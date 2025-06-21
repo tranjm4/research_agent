@@ -10,6 +10,7 @@ This project details the development of an AI agent that can assist with researc
 - citation management
 - conversation memory
 
+## 0. Evaluation Pipeline
 
 ## 1. Planning Module
 
@@ -35,4 +36,5 @@ Refer to the following [robots.txt](https://arxiv.org/robots.txt) for the valid 
 
 ### 6.1 Web Crawler Module
 
+## 7. Vector Database
 
