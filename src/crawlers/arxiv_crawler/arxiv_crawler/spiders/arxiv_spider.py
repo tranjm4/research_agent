@@ -1,9 +1,4 @@
-from bs4 import BeautifulSoup
-import requests
-import re
 from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
-import time
 
 from dotenv import load_dotenv
 import os
@@ -12,13 +7,12 @@ import logging
 import scrapy
 from scrapy.spiders import CrawlSpider, Rule
 from scrapy.linkextractors import LinkExtractor
-from scrapy.crawler import CrawlerProcess
 
 CRAWL_DELAY = 15 # crawl-delay stated by robots.txt
 ALLOWED_PATHS = ["/archive", "year", "/abs", "/list", "/pdf", "/html", "/catchup"]
 VALID_YEARS = [str(i) for i in range(2015, 2024)]
 
-class ArxivCrawler(scrapy.spiders.CrawlSpider):
+class ArxivCrawler(CrawlSpider):
     name = "arxiv_crawler"
     custom_settings = {
         "LOG_LEVEL": "INFO",
