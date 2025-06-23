@@ -25,6 +25,6 @@ categories = ["astro-ph",
 process = CrawlerProcess(get_project_settings())
 
 for cat in categories:
-    process.crawl(ArxivCrawler, category=cat)
+    process.crawl(ArxivCrawler, category=cat, atlas_collection="arxiv_categories")
     
 process.start()

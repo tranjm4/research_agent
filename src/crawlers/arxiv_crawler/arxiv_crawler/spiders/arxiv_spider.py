@@ -49,14 +49,17 @@ class ArxivCrawler(CrawlSpider):
         # step 1: find categories within subjects -> get to lists of recent articles
         Rule(LinkExtractor(allow=(r"/list/.+/recent",), deny=(r"\?.*")), callback="log_url", follow=True),
         # step 2: find recent articles within categories -> get to abstracts
-        Rule(LinkExtractor(allow=(r"(/abs/\d{4}\.\d{4,5})|(/abs/[a-z\-]+/\d{7})",)), callback="parse_abstract", follow=True),
+        Rule(LinkExtractor(allow=(r"(/abs/\d{4}\.\d{4,5})|(/abs/[a-z\-]+/\d{7})",)), callback="parse_abstract", follow=False),
     )
     
-    def __init__(self, category=None, *args, **kwargs):
+    def __init__(self, category=None, atlas_collection="arxiv_collection", 
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         if category:
             self.start_urls = [f"https://arxiv.org/archive/{category}"]
             self.allowed_domains = ["arxiv.org"]
+            self.atlas_collection = atlas_collection
+            self.atlas_category = category
         # self.client = self.connect_atlas_client()
         # self.collection = self.client["arxiv_db"]["arxiv_collection"]
         
@@ -76,7 +79,8 @@ class ArxivCrawler(CrawlSpider):
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(ArxivCrawler, cls).from_crawler(crawler, *args, **kwargs)
         spider.client = spider.connect_atlas_client()
-        spider.collection = spider.client["arxiv_db"]["arxiv_collection"]
+        category, atlas_collection = kwargs.get("category"), kwargs.get("atlas_collection")
+        spider.collection = spider.client["arxiv_db"][atlas_collection][category]
         return spider
     
     def connect_atlas_client(self):
@@ -100,7 +104,7 @@ class ArxivCrawler(CrawlSpider):
             self.client.close()
         
     def log_url(self, response: scrapy.http.Response):
-        self.logger.info(f"Retrieved URL: {response.url}")
+        self.logger.info(f"[{self.atlas_category}] Retrieved URL: {response.url}")
 
     def parse_abstract(self, response: scrapy.http.Response):
         title = response.css("h1.title::text").getall()
@@ -109,8 +113,8 @@ class ArxivCrawler(CrawlSpider):
         title = "".join(title).strip()
         abstract = "".join(abstract).strip()
         
-        self.logger.info(f"Retrieved title: {title}")
-        self.logger.info(f"Retrieved abstract: {abstract[:50]} ...")
+        self.logger.info(f"[{self.atlas_category}] Retrieved title: {title}")
+        self.logger.info(f"[{self.atlas_category}] Retrieved abstract: {abstract[:50]} ...")
 
         document = {
             "url": response.url,
