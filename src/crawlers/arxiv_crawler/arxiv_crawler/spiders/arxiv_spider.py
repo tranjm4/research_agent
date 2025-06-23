@@ -104,20 +104,25 @@ class ArxivCrawler(CrawlSpider):
             self.client.close()
         
     def log_url(self, response: scrapy.http.Response):
-        self.logger.info(f"[{self.atlas_category}] Retrieved URL: {response.url}")
+        self.logger.info(f"[{self.atlas_category}]\n\tRetrieved URL: {response.url}\n")
 
     def parse_abstract(self, response: scrapy.http.Response):
-        title = response.css("h1.title::text").getall()
+        title = response.css("h1.title::text").get()
         abstract = response.css("blockquote.abstract::text").getall()
+        doi_url = response.css("#arxiv-doi-link::text").get()
+        url = response.url
         
-        title = "".join(title).strip()
+        title = title.strip()
         abstract = "".join(abstract).strip()
         
-        self.logger.info(f"[{self.atlas_category}] Retrieved title: {title}")
-        self.logger.info(f"[{self.atlas_category}] Retrieved abstract: {abstract[:50]} ...")
+        self.logger.info(f"""[{self.atlas_category}]\n \
+            \tRetrieved ARTICLE: {url} ({doi_url})\n \
+            \ttitle: \t{title}\n \
+            \tabstract: \t{abstract[:30]} ...\n""")
 
         document = {
             "url": response.url,
+            "doi_url": doi_url,
             "title": title,
             "abstract": abstract
         }
