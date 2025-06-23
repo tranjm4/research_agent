@@ -111,18 +111,21 @@ class ArxivCrawler(CrawlSpider):
         abstract = response.css("blockquote.abstract::text").getall()
         doi_url = response.css("#arxiv-doi-link::text").get()
         url = response.url
+        subcategory = response.css("div.current::text").get()
         
         title = title.strip()
         abstract = "".join(abstract).strip()
         
-        self.logger.info(f"""[{self.atlas_category}]\n \
+        self.logger.info(f"""[{subcategory}]\n \
             \tRetrieved ARTICLE: {url} ({doi_url})\n \
+            \tsubcategory: {subcategory}\n \
             \ttitle: \t{title}\n \
             \tabstract: \t{abstract[:30]} ...\n""")
 
         document = {
             "url": response.url,
             "doi_url": doi_url,
+            "subcategory": subcategory,
             "title": title,
             "abstract": abstract
         }
