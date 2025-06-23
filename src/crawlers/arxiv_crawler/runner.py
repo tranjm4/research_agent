@@ -22,7 +22,7 @@ categories = ["astro-ph",
               "stat"
              ]
 
-process = CrawlerProcess(get_project_settings())
+process = CrawlerProcess()
 
 for cat in categories:
     process.crawl(ArxivCrawler, category=cat)
