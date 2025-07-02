@@ -24,7 +24,7 @@ from uuid import uuid4
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def construct_shard_index(name, embedding, documents_list, nlist=100, nprobe=10, directory="./saved_indices"):
+def construct_shard_index(embedding, documents_list, nlist=100, nprobe=10, directory="./saved_indices"):
     """
     Construct and save a shard index for the given name using the specified embedding model.
 
@@ -43,7 +43,7 @@ def construct_shard_index(name, embedding, documents_list, nlist=100, nprobe=10,
 
     index.train(training_vectors)
 
-    save_shard_index(index, name, directory)
+    save_shard_index(index, directory)
     return index
 
 
@@ -86,7 +86,7 @@ def get_training_vectors(documents_list, embedding):
     return training_vectors
     
 
-def save_shard_index(shard_index, name, path) -> None:
+def save_shard_index(shard_index, path) -> None:
     """
     Save the FAISS shard index to a file.
 
@@ -98,6 +98,6 @@ def save_shard_index(shard_index, name, path) -> None:
 
     if os.path.exists(path) == False:
         os.makedirs(path)
-    faiss.write_index(shard_index, f"{path}/{name}.faiss")
+    faiss.write_index(shard_index, f"{path}/index.faiss")
 
     return
