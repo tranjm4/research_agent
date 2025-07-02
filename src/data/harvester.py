@@ -5,7 +5,6 @@ Interacts with arXiv's Open Archives Initiative (OAI) to harvest archive metadat
 """
 
 import requests
-import json
 import xml.etree.ElementTree as ET
 
 from tqdm import tqdm
@@ -228,3 +227,4 @@ if __name__ == "__main__":
     parse_args()
     harvest_threading()
     
+# TODO: Ran out of storage at weeks 2025-01-13 => 01-20 => 01-27 => 02-03
