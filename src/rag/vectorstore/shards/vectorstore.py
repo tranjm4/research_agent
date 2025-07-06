@@ -1,3 +1,9 @@
+"""
+File: vectorstore.py
+
+This module defines an interface for creating and managing vector store shards (primarily utilized by build_vectorstore.py)
+"""
+
 import faiss
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings

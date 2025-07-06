@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from argparse import ArgumentParser
 from langchain_openai import OpenAIEmbeddings
-from langchain_core.documents import Document
 
 from dotenv import load_dotenv
 load_dotenv()
