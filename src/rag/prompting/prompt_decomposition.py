@@ -18,8 +18,6 @@ from random import sample
 from prompt_synthesis import load_synthesis_prompts
 import ast
 
-from pprint import pprint
-
 
 def get_decomposition_prompt():
     """
