@@ -5,3 +5,4 @@ langchain-community
 tiktoken
 pymongo
 scrapy
+langchain-ollama
