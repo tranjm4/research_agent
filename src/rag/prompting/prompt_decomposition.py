@@ -62,7 +62,7 @@ def parse_decomposition_output(content):
     output_dict = [ast.literal_eval(line) for line in output_list if line.strip()]
     return output_dict
 
-def compute_decomposition(user_prompt: str) -> dict:
+def compute_decomposition(user_prompt: str, model: ChatOllama) -> dict:
     """
     Computes the decomposition of the input prompt into keywords and phrases.
     
@@ -77,8 +77,6 @@ def compute_decomposition(user_prompt: str) -> dict:
     system_template = SystemMessagePromptTemplate.from_template(decomposition_prompt)
     human_template = HumanMessagePromptTemplate.from_template("{input_prompt}")
 
-    llm = ChatOllama(model="llama3.2", temperature=0.1, max_tokens=1000)
-
     decomposition_template = ChatPromptTemplate.from_messages(
         [system_template, human_template]
     )
@@ -87,7 +85,7 @@ def compute_decomposition(user_prompt: str) -> dict:
         {
             "input_prompt": lambda x: x["input_prompt"]
         },
-        decomposition_template | llm \
+        decomposition_template | model \
         | RunnableLambda(lambda x: parse_decomposition_output(x.content))
     )
     
