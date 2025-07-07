@@ -9,8 +9,8 @@ If you can answer the question with contextual information, you should not reque
 Fill with Nil where no tool or helper is required
 
 AVAILABLE TOOLS
-- Search Tool: Used to search the internet for information
-- Math Tool: Used for any mathematical calculations
+- Search Tool: Used to search the database for academic-related information
+- Citation Tool: Used to cite academic papers
 - Summary Tool: Used to summarize large chunks of text
 
 AVAILABLE HELPERS
