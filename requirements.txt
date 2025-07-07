@@ -6,3 +6,4 @@ tiktoken
 pymongo
 scrapy
 langchain-ollama
+ragas
