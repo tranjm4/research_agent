@@ -146,9 +146,3 @@ def load_shards(embedding_module, path="./saved_shards", k=3):
             raise ValueError(f"Directory {dir_path} does not exist or is not a directory.")
 
     return shards
-
-if __name__ == "__main__":
-    embedding_module = OpenAIEmbeddings(model="text-embedding-3-small")
-    shards = load_shards(embedding_module)
-    from pprint import pprint
-    pprint(shards)
