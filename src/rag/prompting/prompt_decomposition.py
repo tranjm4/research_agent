@@ -13,9 +13,6 @@ from langchain_ollama import ChatOllama
 from langchain_core.runnables import RunnableLambda, RunnableSequence
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 
-from random import sample
-
-from prompt_synthesis import load_synthesis_prompts
 import ast
 
 
@@ -36,6 +33,7 @@ def get_decomposition_prompt():
     {{"keywords": ["keyword1", "keyword2", "keyword3", "additional keyword"]}}
     
     Do not include any additional text or explanations.
+    If the prompt is not related to research papers, return an empty dictionary
     
     EXAMPLES
 
@@ -64,7 +62,7 @@ def parse_decomposition_output(content):
     output_dict = [ast.literal_eval(line) for line in output_list if line.strip()]
     return output_dict
 
-def compute_decomposition(num_samples=5):
+def compute_decomposition(user_prompt: str) -> dict:
     """
     Computes the decomposition of the input prompt into keywords and phrases.
     
@@ -75,10 +73,6 @@ def compute_decomposition(num_samples=5):
         dict: A dictionary containing the keywords and phrases.
     """
     decomposition_prompt = get_decomposition_prompt()
-    
-    prompts = load_synthesis_prompts()
-    sampled_prompts = sample(prompts, num_samples)
-    sampled_prompts_str = "\n".join(sampled_prompts)
     
     system_template = SystemMessagePromptTemplate.from_template(decomposition_prompt)
     human_template = HumanMessagePromptTemplate.from_template("{input_prompt}")
@@ -97,16 +91,23 @@ def compute_decomposition(num_samples=5):
         | RunnableLambda(lambda x: parse_decomposition_output(x.content))
     )
     
-    keywords_list = chain.invoke({"input_prompt": sampled_prompts_str})
-    
-    zipped_results = zip(sampled_prompts, keywords_list)
-    for r in zipped_results:
-        prompt, output = r
-        print(f"Prompt: {prompt}\nDecomposed Output: {output}\n")
+    keywords_list = chain.invoke({"input_prompt": user_prompt})
 
     return keywords_list
+
+def invoke(input_prompt: str) -> list:
+    """
+    Invoke the decomposition model with the given input prompt.
+    
+    Args:
+        input_prompt (str): The input prompt to decompose.
+        
+    Returns:
+        list: A list of keywords and phrases extracted from the input prompt.
+    """
+    return compute_decomposition(input_prompt)
     
 
 
 if __name__ == "__main__":
-    compute_decomposition(5)
+    print(compute_decomposition("What are recent breakthroughs in using diffusion models for image generation?"))
