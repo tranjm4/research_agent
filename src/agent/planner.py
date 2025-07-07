@@ -10,6 +10,7 @@ Fill with Nil where no tool or helper is required
 
 AVAILABLE TOOLS
 - Search Tool: Used to search the database for academic-related information
+- Decomposition Tool: Used to break down complex questions into simpler parts
 - Citation Tool: Used to cite academic papers
 - Summary Tool: Used to summarize large chunks of text
 
