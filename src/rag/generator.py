@@ -40,6 +40,8 @@ class Generator:
                                 num_predict=max_tokens
         )
         
+        self.chain = self.build_chain()
+        
     def build_chain(self):
         """
         Builds the chain for generating responses using the provided system template.
@@ -52,7 +54,7 @@ class Generator:
             self.prompt_template | self.model
         )
 
-    def invoke(self, input: str, retrieved_docs: list) -> str:
+    def invoke(self, user_prompt: str, retrieved_docs: list) -> str:
         """
         Generates a response based on the input and retrieved documents.
 
@@ -63,6 +65,37 @@ class Generator:
         Returns:
             str: The generated response.
         """
-        # Placeholder for actual generation logic
         
-        return f"Generated response for input: {input} with docs: {retrieved_docs}"
+        model_input = {
+            "input": user_prompt,
+            "context": retrieved_docs
+        }
+        response = self.chain.invoke(model_input)
+        
+        return response
+    
+if __name__ == "__main__":
+    system_template = """
+    You are a research assistant. Your task is to assist with research tasks
+    by providing relevant information and insights.
+    You will receive a question and a list of retrieved documents.
+    Use the information in the documents to answer the question as accurately as possible.
+    
+    If the documents do not contain enough information,
+    you can use your general knowledge to provide a comprehensive answer.
+
+    You should always cite the documents' URLs you used to answer the question.
+
+    If you cannot find any relevant information in the documents,
+    you should respond with "I don't know" or "I cannot answer that question based on the provided documents."
+    
+    Your response should be concise and to the point.
+    
+    You will receive the user's question and the retrieved documents in the following format:
+    {"input": "<user's question>", "context": ["<doc1>", "<doc2>", "<doc3>"]}
+    
+    Please provide your response in the following format:
+    {"response": "<your response>"}
+    """
+    
+    generator = Generator(system_template=system_template, model="llama3.2:1b")
