@@ -21,7 +21,7 @@ class CoreModel:
         self.model = ChatOllama(model_name=model_name,
                                 **kwargs)  # Initialize the model with the given name and additional parameters
         self.prompt_template = prompt_template
-        self.runnable = RunnableSequence(
+        self.chain = RunnableSequence(
             {
                 "input": lambda x: x["input"],
                 "question_trace": lambda x: x["question_trace"],
@@ -30,26 +30,34 @@ class CoreModel:
             # include planner before sending it to the model
             self.prompt_template | self.model
         )
-
-
-def core_prompt():
+        
+        """
+        IDEA: consider making planner model create a runnable sequence chain
+        """
+    def invoke(self, input_data: dict):
+        """
+        Invokes the core model with the provided input data.
+        Args:
+            input_data (dict): A dictionary containing the input data for the model.
+        Returns:
+            The output from the model after processing the input.
+        """
+        return self.chain.invoke(input_data)
+        
+def get_core_prompt():
     """
-    Returns the core prompt template for the agent.
+    Base system prompt for the core model (for prototyping purposes).
+    Returns:
+        str: The system prompt for the core model.
     """
-    system_template = """
-    You are a research assistant. Your task is to assist with research tasks by providing relevant information and insights.
-    You will receive a series of input prompts that are related to research papers.
+    prompt = """
+    You are a research agent. Your task is to answer user questions and queries.
+    You also have access to a set of tools that can help you answer questions.
     
+    You will receive a user question and a trace of previous questions and answers.
+    Use this information to generate a response that addresses the user's query.
+    
+    Ensure that your response is clear, concise, and informative.
     """
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            SystemMessagePromptTemplate.from_template(
-                "You are a research assistant. Your task is to assist with research tasks by providing relevant information and insights."
-            ),
-            HumanMessagePromptTemplate.from_template(
-                "{input}"
-            )
-        ]
-    )
-
+    
     return prompt
