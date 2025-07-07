@@ -1,4 +1,4 @@
-from vectorstore.shards.vectorstore import load_shards
+from rag.vectorstore.shards.vectorstore import load_shards
 from langchain_openai import OpenAIEmbeddings
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,14 +45,23 @@ def query(input: str, shards: list | None = None, embedding: OpenAIEmbeddings | 
                 print(f"Error querying shard: {e}")
 
     return query_results
+        
+def load_db(path: str = "./saved_vectorstore_shards") -> list:
+    """
+    Load vector store shards from the specified path.
+
+    Args:
+        embedding_module (OpenAIEmbeddings): The embedding module to use for loading the shards.
+        path (str): The path to the directory containing the vector store shards.
+
+    Returns:
+        list: A list of loaded vector store shards.
+    """
+    embedding_module = OpenAIEmbeddings(model="text-embedding-3-small")
+    return load_shards(embedding_module)
+
 
 if __name__ == "__main__":
-    # Example usage
-    embedding_module = OpenAIEmbeddings(model="text-embedding-3-small")
-    shards = load_shards(embedding_module)
-    
-    input_query = "What papers are related to quantum computing?"
-    results = query(input_query, shards, embedding_module)
-    
-    for result in results:
-        print(result)
+    db = load_db()
+    for shard in db:
+        print(shard)
