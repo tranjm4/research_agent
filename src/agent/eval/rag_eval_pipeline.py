@@ -13,7 +13,7 @@ import eval_metrics
 from argparse import ArgumentParser
 from datetime import datetime
 from langchain_ollama import ChatOllama
-from ragas import Ragas
+from rag.retriever import Retriever
 
 def process_args():
     """
@@ -36,13 +36,13 @@ def run_pipeline(args):
     Args:
         args (argparse.Namespace): Parsed command line arguments.
     """
-    # Initialize the Ragas instance
-    ragas = Ragas()
-    
+    retriever = Retriever()
     # Load the LLM for evaluation
     llm = ChatOllama(model=args.name, temperature=args.temperature, max_tokens=1000)
     
-    # Evaluate the agent's performance
+    get_test_data
+
+    # Evaluate the RAG system's performance
     precision = eval_metrics.compute_precision(10, 5)  # Example values
     recall = eval_metrics.compute_recall(10, 5)        # Example values
     f1_score = eval_metrics.compute_f1_score(precision, recall)
