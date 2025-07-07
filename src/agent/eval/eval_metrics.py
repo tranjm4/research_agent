@@ -9,8 +9,57 @@ as well as to evaluate the agent's performance based on the number of relevant d
 from datetime import datetime
 from argparse import ArgumentParser
 from langchain_ollama import ChatOllama
+from rag.retriever import Retriever
+
+from ragas.llms import LangchainLLMWrapper
+from ragas.embeddings import LangchainEmbeddingWrapper
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
+def get_test_data(samples_file: str, retriever, generator) -> list:
+    """
+    Retrieves test data.
+    Reads from given file of input prompts,
+    generates responses using the model,
+
+    Args:
+        samples_file (str): Path to the file containing the number of retrieved and relevant documents.
+
+    Returns:
+        list: A list of tuples containing the number of retrieved and relevant documents.
+    """
+    data = []
+    
+    evaluator_llm = LangchainLLMWrapper(
+        llm=ChatOllama(
+            model="llama3.2:1b",
+            temperature=0.1,
+        )
+    )
+    evaluator_embeddings = LangchainEmbeddingWrapper(
+        OpenAIEmbeddings(
+            model="text-embedding-3-small")
+    )
+    
+    with open(samples_file, "r") as file:
+        prompts = file.readlines()
+    
+    for prompt in prompts:
+        # retrieve context using the retriever
+        retrieved_docs = retriever.invoke(prompt.strip())
+        
+        # generate response using the generator
+        response = generator.invoke(prompt.strip())
+        
+        # add input, retrieved documents, and response to data
+        data.append({
+            "user_input": prompt.strip(),
+            "context": retrieved_docs,
+            "response": response
+        })
+        
+        
+        
 
 
 def compute_precision(retrieved: int, relevant: int) -> float:
