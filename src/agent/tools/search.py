@@ -31,4 +31,4 @@ class SearchModel(ToolModelWrapper):
             model_name=model_name,
             parse_func=self.parse_func,
             **kwargs
-        )    
+        )
