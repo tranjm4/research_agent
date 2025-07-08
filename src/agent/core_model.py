@@ -2,9 +2,10 @@ from langchain_ollama import ChatOllama
 from langchain_core.runnables import RunnableLambda, RunnableSequence
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate, AIMessagePromptTemplate
 
-from rag.prompting import prompt_decomposition as decomposition
+from rag.prompting import keyword_decomposition as decomposition
 
-from agent.planner import PlannerModel
+import agent.planner as planner
+import agent.tools.task_decomposition as task_decomp
 
 from argparse import ArgumentParser
 
@@ -14,7 +15,11 @@ class CoreModel:
     It sets up the model, prompt, and runnable sequence for processing input.
     """
 
-    def __init__(self, prompt_template: str, model: str = "llama3.2:3b", **kwargs):
+    def __init__(self, prompt_template: str, 
+                 model: str = "llama3.2:3b", 
+                 planner_model: str = "llama3.2:1b",
+                 decomp_model: str = "mistral:7b",
+                 **kwargs):
         """
         Initializes the CoreModel with a prompt template and model name.
         Args:
@@ -24,6 +29,20 @@ class CoreModel:
         """
         self.model = ChatOllama(model=model,
                                 **kwargs)  # Initialize the model with the given name and additional parameters
+        
+        self.planner_model = planner.PlannerModel(
+            system_prompt=planner.default_planner_prompt(),
+            model_name=planner_model,
+            temperature=kwargs.get("temperature", 0.1),
+            num_ctx=kwargs.get("max_tokens", 20000),
+        )
+        self.decomp_model = task_decomp.TaskDecompositionModel(
+            system_prompt=task_decomp.decomp_prompt,
+            model=decomp_model,
+            temperature=kwargs.get("temperature", 0.1),
+            num_ctx=kwargs.get("max_tokens", 20000),
+        )
+        
         self.prompt_template = prompt_template
         self.chain = RunnableSequence(
             {
@@ -32,7 +51,9 @@ class CoreModel:
                 "answer_trace": lambda x: x["answer_trace"],
             },
             # include planner before sending it to the model
-            self.prompt_template |  self.model
+            self.prompt_template | self.decomp_model \
+            | RunnableLambda(lambda subqs: list(map(self.planner_model.invoke, subqs))) \
+            |self.model
         )
         
         """
@@ -96,9 +117,25 @@ def main_loop(args):
         ]
     )
     # Initialize the core model with the provided arguments
+    # prompt_decomposition_model = task_decomp.TaskDecompositionModel(
+    #     system_prompt=task_decomp.decomp_prompt,
+    #     model=args.decomp_model,
+    #     temperature=args.temperature,
+    #     num_ctx=args.max_tokens,
+    # )
+    
+    # planner_model = planner.PlannerModel(
+    #     system_prompt=planner.default_planner_prompt(),
+    #     model_name=args.planner_model,
+    #     temperature=args.temperature,
+    #     num_ctx=args.max_tokens,
+    # )
+    
     core_model = CoreModel(
         prompt_template=prompt_template,
         model=args.model,
+        planner_model=args.planner_model,
+        decomp_model=args.decomp_model,
         temperature=args.temperature,
         num_ctx=args.max_tokens,
     )
@@ -135,8 +172,12 @@ def main_loop(args):
 if __name__ == "__main__":
     # parse args
     parser = ArgumentParser(description="Core Model for Research Agent")
-    parser.add_argument("--model", type=str, default="llama3.2:3b",
+    parser.add_argument("--core_model", type=str, default="llama3.2:3b",
                         help="Name of the model to use (default: llama3.2:3b)")
+    parser.add_argument("--planner_model", type=str, default="llama3.2:1b",
+                        help="Name of the planner model to use (default: llama3.2:1b)")
+    parser.add_argument("--decomp_model", type=str, default="mistral:7b",
+                        help="Name of the task decomposition model to use (default: mistral:7b)")
     parser.add_argument("--prompt_template", type=str, default=get_core_prompt(),
                         help="Prompt template for the model (default: base system prompt)")
     parser.add_argument("--temperature", type=float, default=0.1,
