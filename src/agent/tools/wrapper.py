@@ -62,6 +62,7 @@ class ModelWrapper:
         Returns:
             The output from the model after processing the input.
         """
+        # print(f"Invoking {self.agent_type} model with input: {input_data['input']}")
         return self.chain.invoke(input_data)
     
     def stream(self, input_data: dict):
@@ -98,7 +99,6 @@ class ModelWrapper:
         }
         
         # save the logged attributes to a file or database
-        print(logged_attibutes)
         json_output = json.dumps(logged_attibutes, indent=4)
         with open("model_stats.jsonl", "a") as f:
             f.write(json_output + "\n")
