@@ -4,9 +4,9 @@ File: agent/tools/search.py
 This module defines a search model for the agent, which is used to retrieve relevant information from a vector store.
 """
 
-from agent.tools.wrapper import ToolModelWrapper
+from agent.tools.wrapper import ModelWrapper
 from langchain_core.runnables import RunnableLambda, RunnableSequence
-from rag.prompting import prompt_decomposition
+from rag.prompting import keyword_decomposition
 from rag.vectorstore.vector_db import load_db
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 load_dotenv()
 
-class SearchModel(ToolModelWrapper):
+class SearchModel(ModelWrapper):
     """
     A model wrapper for the search functionality, allowing the agent to search through a vector store.
     """
@@ -26,6 +26,7 @@ class SearchModel(ToolModelWrapper):
         self.parse_func = lambda x: x
 
         super().__init__(
+            agent_type="search",
             system_prompt=system_prompt,
             input_template=self.input_template,
             model_name=model_name,

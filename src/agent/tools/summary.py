@@ -14,6 +14,7 @@ class SummaryModel(ToolModelWrapper):
         self.parse_func = lambda x: x
         
         super().__init__(
+            agent_type="summary",
             system_prompt=system_prompt,
             input_template=self.input_template,
             model_name=model,
