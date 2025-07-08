@@ -4,10 +4,6 @@ File: src/agent/tools/summary.py
 This module provides a model wrapper for summarizing text using a language model.
 """
 
-from langchain_core.runnables import RunnableLambda
-from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from langchain_ollama import ChatOllama
-
 from agent.tools.wrapper import ToolModelWrapper
 
 class SummaryModel(ToolModelWrapper):
