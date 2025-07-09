@@ -1,0 +1,52 @@
+{
+    "model_type": "task_decomposition",
+    "version_name": "prototype",
+    "model_name": "llama3.2:3b",
+    "created_at": "2025-07-08T23:23:08.870017Z",
+    "total_duration": 4159037375,
+    "load_duration": 1848628167,
+    "eval_duration": 950185167,
+    "prompt_eval_duration": 1358139292,
+    "input_tokens": 358,
+    "output_tokens": 32,
+    "total_tokens": 390
+}
+{
+    "model_type": "planner",
+    "version_name": "prototype",
+    "model_name": "llama3.2:1b",
+    "created_at": "2025-07-08T23:23:13.627596Z",
+    "total_duration": 4746571084,
+    "load_duration": 2093926750,
+    "eval_duration": 577109708,
+    "prompt_eval_duration": 2066255250,
+    "input_tokens": 461,
+    "output_tokens": 35,
+    "total_tokens": 496
+}
+{
+    "model_type": "planner",
+    "version_name": "prototype",
+    "model_name": "llama3.2:1b",
+    "created_at": "2025-07-08T23:23:16.668697Z",
+    "total_duration": 3033986958,
+    "load_duration": 49674750,
+    "eval_duration": 2938563084,
+    "prompt_eval_duration": 39554375,
+    "input_tokens": 465,
+    "output_tokens": 170,
+    "total_tokens": 635
+}
+{
+    "model_type": "planner",
+    "version_name": "prototype",
+    "model_name": "llama3.2:1b",
+    "created_at": "2025-07-08T23:23:17.816692Z",
+    "total_duration": 1141368250,
+    "load_duration": 42604208,
+    "eval_duration": 1059909791,
+    "prompt_eval_duration": 37841417,
+    "input_tokens": 467,
+    "output_tokens": 63,
+    "total_tokens": 530
+}
