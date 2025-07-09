@@ -8,43 +8,45 @@ load_dotenv()
 import os
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
-
-def query(input: str, shards: list | None = None, embedding: OpenAIEmbeddings | None = None) -> list:
+class VectorStore:
     """
-    Query the vector database with the given input string.
-
-    Args:
-        input (str): The input string to query the vector database.
-
-    Returns:
-        list: A list of documents that match the query.
+    A class to represent a vector store for storing and querying documents.
+    This class is a wrapper around the vector store shards.
     """
-    if shards is None:
-        # If shards are not provided, load them from the default path
-        shards = load_shards()
 
-    if embedding is None:
-        # If embedding is not provided, use the default OpenAI embedding model
-        embedding = OpenAIEmbeddings(model="text-embedding-3-small")
+    def __init__(self, shards: list | None = None, k: int = 2):
+        """
+        Initializes the VectorStore with the provided shards.
 
-    query_results = []
+        Args:
+            shards (list): A list of vector store shards.
+        """
+        if shards is None:
+            self.shards = load_shards(OpenAIEmbeddings(model="text-embedding-3-small"), k=2)
+        else:
+            self.shards = shards
 
-    with ThreadPoolExecutor(max_workers=len(shards)) as executor:
-        futures = []
-        for shard in shards:
-            # Submit the query task for each shard
-            futures.append(executor.submit(shard.invoke, input))
+    def query(self, input: str) -> list:
+        """
+        Query the vector store with the given input string.
 
-        for future in as_completed(futures):
-            try:
-                # Collect results from each shard
-                results = future.result()
-                if results:
-                    query_results.append(results)
-            except Exception as e:
-                print(f"Error querying shard: {e}")
+        Args:
+            input (str): The input string to query the vector store.
 
-    return query_results
+        Returns:
+            list: A list of documents that match the query.
+        """
+        with ThreadPoolExecutor(max_workers=len(self.shards) // 2) as executor:
+            futures = [executor.submit(shard.invoke, input) for shard in self.shards]
+            query_results = []
+            for future in as_completed(futures):
+                try:
+                    results = future.result()
+                    if results:
+                        query_results.extend(results)
+                except Exception as e:
+                    print(f"Error querying shard: {e}")
+        return query_results
         
 def load_db(path: str = "./saved_vectorstore_shards") -> list:
     """
@@ -57,7 +59,9 @@ def load_db(path: str = "./saved_vectorstore_shards") -> list:
     Returns:
         list: A list of loaded vector store shards.
     """
+    print("Loading vector store shards from path:", path)
     embedding_module = OpenAIEmbeddings(model="text-embedding-3-small")
+    print(f"Using embedding model: {embedding_module.model}")
     return load_shards(embedding_module)
 
 
