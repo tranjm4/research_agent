@@ -32,14 +32,14 @@ class ModelWrapper:
         self.version_name = version_name
         self.model = ChatOllama(model=model, **kwargs)
         self.prompt_template = self.build_prompt_template(system_prompt)
-        
-        self.parse_func = parse_func if parse_func else lambda x: x  # Default to identity function if no parse_func is provided
-        self.parse_func = RunnableLambda(self.parse_func)
+
+        # Default to identity function if no parse_func is provided
+        self.parse_func = parse_func if parse_func else RunnableLambda(lambda x: x)  
         
         self.input_template = RunnableLambda(input_template)
         
         self.chain = self.input_template | self.prompt_template | \
-            self.model | RunnableLambda(lambda x: self.log_stats(x)) |self.parse_func
+            self.model | RunnableLambda(lambda x: self.log_stats(x)) | self.parse_func
         
     def build_prompt_template(self, system_prompt: str) -> ChatPromptTemplate:
         """
