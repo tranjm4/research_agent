@@ -1,8 +1,14 @@
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableSequence, RunnableLambda
+"""
+File: src/backend/agent/tools/task_decomposition.py
+
+This module provides a model wrapper for task decomposition, 
+allowing the agent to break down complex tasks into simpler sub-tasks.
+"""
+
+from langchain_core.runnables import RunnableLambda
 
 from agent.tools.wrapper import ModelWrapper
-import agent.planner as planner
+import backend.agent.tools.planner as planner
 
 import regex as re
 
@@ -11,7 +17,7 @@ class TaskDecompositionModel(ModelWrapper):
         self.input_template = lambda x: {
             "input": x["input"]
         }
-        self.parse_func = parse_decomp_output
+        self.parse_func = RunnableLambda(lambda x: parse_decomp_output(x))
         self.version_name = version_name
 
         super().__init__(

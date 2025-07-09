@@ -5,13 +5,14 @@ This module provides a model wrapper for summarizing text using a language model
 """
 
 from agent.tools.wrapper import ToolModelWrapper
+from langchain_core.runnables import RunnableLambda
 
 class SummaryModel(ToolModelWrapper):
     def __init__(self, system_prompt, model, **kwargs):
         self.input_template = lambda x: {
             "input": x["input"]
         }
-        self.parse_func = lambda x: x
+        self.parse_func = RunnableLambda(lambda x: x)
         
         super().__init__(
             agent_type="summary",

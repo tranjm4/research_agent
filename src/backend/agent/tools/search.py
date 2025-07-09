@@ -8,8 +8,9 @@ from agent.tools.wrapper import ModelWrapper
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda, RunnableSequence
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from rag.prompting import keyword_decomposition
-from rag.vectorstore.vector_db import VectorStore
+
+from agent.tools.rag.prompting import keyword_decomposition
+from agent.tools.rag.vectorstore.vector_db import VectorStore
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -62,7 +63,7 @@ class SearchModel(ModelWrapper):
         self.input_template = lambda x: {
             "input": x["input"]
         }
-        self.vector_db = VectorStore(k=2)
+        self.vector_db = VectorStore(k=1)
         
         self.parse_func = RunnableLambda(lambda x: x)
         
@@ -192,6 +193,7 @@ class SearchModel(ModelWrapper):
         output = self.model.invoke(x["prompt"])
         
         x["model_output"] = output
+        print(output)
         return x
     
     def log_stats(self, x: dict) -> dict:
@@ -246,10 +248,19 @@ if __name__ == "__main__":
     
     # result = search_model.invoke(input_prompt)
     # print("Search Results:", result)
-    search_model = SearchModel(system_prompt=SearchModel.default_prompt, version_name="search/v0", model="mistral:7b", num_ctx=20000, temperature=0.1)
+    search_model = SearchModel(system_prompt=SearchModel.default_prompt, 
+                               version_name="search/mistal:7b",
+                               model="mistral:7b", 
+                               num_ctx=20000, 
+                               temperature=0.1)
     input_prompt = {
         "input": "What are language models' applications in education?"
     }
 
     result = search_model.invoke(input_prompt)
-    print("Search Results:", result)
+    for r in result:
+        print()
+        print(f"Document URL: {r.metadata['url']}")
+        print()
+        print(f"Document Abstract: {r.page_content}\n")
+        print("---"*20)
