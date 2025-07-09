@@ -1,9 +1,0 @@
-langchain
-openai
-langchain-openai
-langchain-community
-tiktoken
-pymongo
-scrapy
-langchain-ollama
-ragas
