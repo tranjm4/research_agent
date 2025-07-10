@@ -7,7 +7,7 @@ class Retriever:
     A class to handle retrieval of documents from a vector database.
     """
 
-    def __init__(self, decomposition_model: str = "default"):
+    def __init__(self, decomposition_model: str | None = None):
         """
         Initializes the Retriever with a decomposition model and loads the vector database.
         """
@@ -31,7 +31,8 @@ class Retriever:
                 try:
                     results = future.result()
                     if results:
-                        query_results.append(results)
+                        for r in results:
+                            query_results.append(r)
                 except Exception as e:
                     print(f"Error querying shard: {e}")
         return query_results
