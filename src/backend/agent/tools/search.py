@@ -5,14 +5,11 @@ This module defines a search model for the agent, which is used to retrieve rele
 """
 
 from agent.tools.wrapper import ModelWrapper
-from langchain_core.documents import Document
-from langchain_core.runnables import RunnableLambda, RunnableSequence
+from langchain_core.runnables import RunnableLambda
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 
 from agent.tools.rag.prompting import keyword_decomposition
-from agent.tools.rag.vectorstore.vector_db import VectorStore
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from agent.tools.rag.retriever import Retriever
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -29,12 +26,12 @@ class SearchModel(ModelWrapper):
     You will be given a user prompt, followed by a numbered list of documents, each with a URL and its abstract.
     Your task is to select the top 3 most relevant documents based on the user prompt.
     
-    Your job is to return a list of the top 3 document numbers.
-    Under any circumstances, do not return more than 3 documents.
+    Your job is to return a list of the top {num_search} document numbers.
+    Under any circumstances, do not return more than {num_search} documents.
     Under any circumstances, do not include any other text or information in your response.
     
     Example input:
-    User prompt: "What are the latest advancements in quantum computing and cybersecurity?"
+    User prompt: "What are the latest advancements in quantum computing and cybersecurity?" (Find 3 relevant documents)
     Documents:
     1. URL: https://example.com/doc1 - Abstract: "This paper discusses the latest advancements in quantum computing, including new algorithms and hardware improvements..."
     2. URL: https://example.com/doc2 - Abstract: "This article reviews the current state of quantum computing research and its implications for the future."
@@ -55,15 +52,23 @@ class SearchModel(ModelWrapper):
     - Document 5 discusses quantum cryptography, which is directly related to cybersecurity.
     - Document 8 discusses the implications of quantum computing for cybersecurity, making it relevant.
     
-    Under any circumstances, do not return more than 3 documents.
+    Under any circumstances, do not return more than {num_search} documents.
     Under any circumstances, do not include any other text or information in your response.
     """
 
-    def __init__(self, system_prompt: str, model: str = "llama3.2:3b", **kwargs):
+    def __init__(self, system_prompt: str, model: str = "llama3.2:3b", num_search: int = 3, **kwargs):
+        """
+        Initializes the SearchModel with a prompt template and model name.
+        Args:
+            system_prompt (str): The template for the prompt.
+            model (str): The name of the ChatOllama model to use.
+            num_search (int): The number of documents to return from the search.
+        """
+        self.num_search = num_search
         self.input_template = lambda x: {
             "input": x["input"]
         }
-        self.vector_db = VectorStore(k=1)
+        self.vector_db = Retriever()
         
         self.parse_func = RunnableLambda(lambda x: x)
         
@@ -82,7 +87,6 @@ class SearchModel(ModelWrapper):
         self.chain = RunnableLambda(lambda x: x["input"]) \
             | RunnableLambda(lambda x: self.search_db(x)) \
             | RunnableLambda(lambda x: self.parse_search_results(x)) \
-            | RunnableLambda(lambda x: self.build_chat_prompt(x)) \
             | RunnableLambda(lambda x: self.run_model(x)) \
             | RunnableLambda(lambda x: self.log_stats(x)) \
             | RunnableLambda(lambda x: self.parse_model_output(x))
@@ -103,9 +107,7 @@ class SearchModel(ModelWrapper):
             }
                 which will be passed through the chain.
         """
-        
-        print(f"Querying vector store with input: {query}")
-        results = self.vector_db.query(query)
+        results = self.vector_db.invoke(query)
         return {
             "user_input": query,
             "search_results": results
@@ -135,39 +137,6 @@ class SearchModel(ModelWrapper):
         )
         
         return x
-
-    def build_chat_prompt(self, x: str) -> dict:
-        """
-        Builds the chat prompt for the search model.
-        
-        Args:
-            context (str): The input data containing the context
-        
-        Returns:
-            dict: {
-                "user_input": str,
-                "search_results": list[Document],
-                "parsed_search_results": str,
-                "prompt": str
-            }
-        """
-        chat_prompt_template = ChatPromptTemplate.from_messages(
-            [
-                SystemMessagePromptTemplate.from_template(SearchModel.default_prompt),
-                HumanMessagePromptTemplate.from_template("User Prompt: {user_input}\n"
-                                                         "Documents: \n{input}"),
-            ]
-        )
-        
-        prompt = chat_prompt_template.invoke(
-            {
-                "user_input": x["user_input"],
-                "input": x["parsed_search_results"]
-            }
-        )
-        
-        x["prompt"] = prompt
-        return x
     
     def run_model(self, x: dict) -> dict:
         """
@@ -177,7 +146,6 @@ class SearchModel(ModelWrapper):
                 - "user_input" (str): The user input string.
                 - "search_results" (list[Document]): A list of Document objects containing the search results.
                 - "parsed_search_results" (str): The parsed search results string.
-                - "prompt" (str): The chat prompt to be sent to the model.
             
         Returns:
             dict: The output from the model, which will be passed through the chain.
@@ -185,15 +153,28 @@ class SearchModel(ModelWrapper):
                 "user_input": str
                 "search_results": list[Document],
                 "parsed_search_results": str,
-                "prompt": str,
                 "model_output": str
             }
         """
+        chat_prompt_template = ChatPromptTemplate.from_messages(
+            [
+                SystemMessagePromptTemplate.from_template(SearchModel.default_prompt),
+                HumanMessagePromptTemplate.from_template("User Prompt: {user_input} (Find {num_search} relevant documents)\n"
+                                                         "Documents: \n{input}"),
+            ]
+        )
         
-        output = self.model.invoke(x["prompt"])
+        prompt = chat_prompt_template.invoke(
+            {
+                "user_input": x["user_input"],
+                "num_search": self.num_search,
+                "input": x["parsed_search_results"]
+            }
+        )
+        
+        output = self.model.invoke(prompt)
         
         x["model_output"] = output
-        print(output)
         return x
     
     def log_stats(self, x: dict) -> dict:
@@ -214,15 +195,28 @@ class SearchModel(ModelWrapper):
         super().log_stats(x["model_output"])
         return x
 
-    def parse_model_output(self, x: dict) -> list[int]:
+    def parse_model_output(self, x: dict) -> dict:
         """
         Parses the model output to extract the top 3 document numbers.
         
         Args:
-            model_output (str): The output from the model.
+            x (dict): A dictionary containing the input data with keys:
+                - "user_input" (str): The user input string.
+                - "search_results" (list[Document]): A list of Document objects containing the search results.
+                - "parsed_search_results" (str): The parsed search results string.
+                - "prompt" (str): The chat prompt to be sent to the model.
+                - "model_output" (OllamaChatCompletion): The output from the model.
         
         Returns:
-            list[int]: A list of the top 3 document numbers.
+            dict: The input data with an additional key "content" containing the parsed model output.
+            {
+                "user_input": str,
+                "search_results": list[Document],
+                "parsed_search_results": str,
+                "prompt": str,
+                "model_output": OllamaChatCompletion,
+                "content": list[Document]
+            }
         """
         try:
             # Extract the document numbers from the model output
@@ -234,23 +228,19 @@ class SearchModel(ModelWrapper):
             for num in doc_numbers:
                 parsed_model_output.append(documents_list[num])
                 
-            return parsed_model_output
+            x["content"] = parsed_model_output
+                
+            return x
                 
         except ValueError as e:
             print(f"Error parsing model output: {e}")
             return []
         
 if __name__ == "__main__":
-    # search_model = SearchModel(system_prompt=SearchModel.default_prompt, model_name="llama3.2:3b")
-    # input_prompt = {
-    #     "input": "What are the latest advancements in large language models and their applications in education?"
-    # }
-    
-    # result = search_model.invoke(input_prompt)
-    # print("Search Results:", result)
     search_model = SearchModel(system_prompt=SearchModel.default_prompt, 
                                version_name="search/mistal:7b",
-                               model="mistral:7b", 
+                               model="mistral:7b",
+                               num_search=5,
                                num_ctx=20000, 
                                temperature=0.1)
     input_prompt = {
@@ -258,7 +248,7 @@ if __name__ == "__main__":
     }
 
     result = search_model.invoke(input_prompt)
-    for r in result:
+    for r in result["content"]:
         print()
         print(f"Document URL: {r.metadata['url']}")
         print()
