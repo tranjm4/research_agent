@@ -1,0 +1,21 @@
+metadata:
+  name: "mistral_7b_v0"
+  version: "0"
+  num_parameters: 7
+
+model_kwargs:
+  model: "mistral:7b"
+  temperature: 0.1
+  top_p: 0.95
+  top_k: 50
+  num_ctx: 10000
+  system_prompt: "mistral7b_1.txt"
+
+search_params:
+  num_search: 3
+  docs_per_shard: 1
+
+eval_params:
+  num_samples: 20
+  sample_file: "sample_prompts.txt"
+  save_file: "eval_metrics_mistral7b_v0.json"
