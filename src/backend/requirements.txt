@@ -9,3 +9,4 @@ langchain-ollama
 ragas
 fastapi
 uvicorn
+pyyaml
