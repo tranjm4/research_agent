@@ -11,6 +11,7 @@ Evaluation metrics include:
 
 from agent.tools.search import SearchModel
 from agent.eval.search.precision_eval_model import PrecisionEvalModel
+from agent.tools.rag.retriever import Retriever
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -51,9 +52,10 @@ def evaluate_search_model(search_model, eval_model, prompt_samples):
     k = search_model.num_search
 
     for prompt in tqdm.tqdm(prompt_samples, desc="Evaluating prompts"):
-        print(f"Searching with prompt: {prompt}... ", end="", flush=True)
         start_time = time.time()
-        doc_list = search_model.invoke({"input": prompt})["content"]
+        doc_list = search_model.invoke({"input": prompt})
+        if type(doc_list) != list:
+            doc_list = doc_list["content"]
         
         print(f"Done. Evaluating results... ", end="", flush=True)
         
@@ -161,11 +163,16 @@ if __name__ == '__main__':
         num_eval_samples = config["eval_params"]["num_samples"]
         sample_file = config["eval_params"]["sample_file"]
         
-        model_kwargs["system_prompt"] = load_system_prompt(model_kwargs["system_prompt"])
-        
+        # Baseline does not require a SearchModel
+        if metadata["name"] != "baseline":
+            model_kwargs["system_prompt"] = load_system_prompt(model_kwargs["system_prompt"])
         # initialize the search model
-        search_model = SearchModel(version_name=metadata["name"], **model_kwargs)
-        precision_eval_model = PrecisionEvalModel()
+            search_model = SearchModel(version_name=metadata["name"], **model_kwargs)
+        else:
+            # instead, search_model is the VectorStore
+            search_model = Retriever(decomposition_model=None)
+            
+        precision_eval_model = PrecisionEvalModel(model_name=config["eval_params"]["eval_model"], temperature=0.05)
         # get the prompt samples
         prompt_samples = get_prompt_samples(num_eval_samples, sample_file)
         
