@@ -59,6 +59,7 @@ class ModelWrapper:
 
         Args:
             input_data (dict): A dictionary containing the input data for the model.
+            The dict should have a key "input" with the input string.
 
         Returns:
             The output from the model after processing the input.

@@ -7,26 +7,30 @@ class Retriever:
     A class to handle retrieval of documents from a vector database.
     """
 
-    def __init__(self, decomposition_model: str | None = None):
+    def __init__(self, decomposition_model: str | None = None, num_per_shard: int = 1):
         """
         Initializes the Retriever with a decomposition model and loads the vector database.
         """
         self.decomposition_model = decomposition_model
         self.shards = load_db()
+        self.num_search = num_per_shard * len(self.shards)
 
-    def invoke(self, input: str) -> list:
+    def invoke(self, query: dict) -> list:
         """
         Query the vector database with the given input string.
 
         Args:
-            input (str): The input string to query the vector database.
+            query (dict): The input dictionary to query the vector database.
 
         Returns:
             list: A list of documents that match the query.
         """
+        if type(query) is str:
+            query = {"input": query}
+        prompt = query["input"]
         query_results = []
         with ThreadPoolExecutor(max_workers=len(self.shards)) as executor:
-            futures = [executor.submit(shard.invoke, input) for shard in self.shards]
+            futures = [executor.submit(shard.invoke, prompt) for shard in self.shards]
             for future in as_completed(futures):
                 try:
                     results = future.result()
