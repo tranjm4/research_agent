@@ -18,7 +18,7 @@ class PrecisionEvalModel:
         prompt_template (PromptTemplate): The template for generating prompts.
     """
     
-    def __init__(self, model_name: str = "llama3.2:1b", temperature: float = 0.1):
+    def __init__(self, model_name: str = "mistral:7b", temperature: float = 0.1):
         """
         Initializes the PrecisionEvalModel with a specified model and temperature.
         
