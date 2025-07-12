@@ -16,6 +16,7 @@ search_params:
   docs_per_shard: 1
 
 eval_params:
+  eval_model: "mistral:7b"
   num_samples: 40
   sample_file: "sample_prompts.txt"
   save_file: "eval_metrics_mistral7b_v0_2.json"
