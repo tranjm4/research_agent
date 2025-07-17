@@ -1,0 +1,13 @@
+params:
+  encoder_model: "cross-encoder/ms-marco-MiniLM-L-12-v2"
+  num_per_shard: 5
+  top_k: 5
+
+metadata:
+  model_name: "cross-encoder/ms-marco-MiniLM-L-12-v2"
+  type: "retriever"
+  version_name: "retriever/cross-encoder/ms-marco-MiniLM-L-12-v2/v1"
+
+logs:
+  out_file: "logs/retriever/output.txt"
+  err_file: "logs/retriever/error.txt"
