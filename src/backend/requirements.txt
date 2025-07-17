@@ -10,3 +10,7 @@ ragas
 fastapi
 uvicorn
 pyyaml
+sentence-transformers
+ddgs
+pydantic
+langgraph
