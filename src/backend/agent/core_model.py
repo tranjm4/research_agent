@@ -1,11 +1,20 @@
-from langchain_ollama import ChatOllama
-from langchain_core.runnables import RunnableLambda, RunnableSequence
-from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate, AIMessagePromptTemplate
+from langchain_core.runnables import RunnableLambda, RunnableSequence, RunnableParallel
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate, AIMessagePromptTemplate, PromptTemplate
+from langchain_core.messages import ChatMessage, ToolMessage, HumanMessage, AIMessage, SystemMessage
+from langchain.chat_models import init_chat_model
+from langchain.chat_models.base import BaseChatModel
 
-from rag.prompting import keyword_decomposition as decomposition
+from agent.tools.rag.prompting import keyword_decomposition as decomposition
+from agent.tools.search import SearchTool
+from agent.tools.retriever import Retriever
 
-import agent.planner as planner
-import agent.tools.task_decomposition as task_decomp
+from typing import Dict, Any
+from agent.utils import ModelWrapper, State, log_stats
+
+import time
+
+import yaml
+import os
 
 from argparse import ArgumentParser
 
@@ -14,60 +23,70 @@ class CoreModel:
     CoreModel class that initializes the core model for the agent.
     It sets up the model, prompt, and runnable sequence for processing input.
     """
+    
+    default_system_prompt = """
+    You are a research expert. Your task is to answer user questions and queries.
+    You also have helper models that provide additional context and information,
+    such as summarization, search, and decomposition.
+    
+    You have access to the following tools to give you additional context:
+    - search_tool: Searches the web for information based on the input query.
+    - retriever_tool: Retrieves relevant documents from a vector database based on the input query.
+    
+    Your task is to answer the user's prompt based on the context you are given.
+    
+    If you refer to a document, you must cite the document's url in parentheses. Do not mention the document's number.
+    If you use one of these tools and they are not able to find any relevant information, you should say "I don't know" or "I cannot answer that question".
 
-    def __init__(self, prompt_template: str, 
-                 model: str = "llama3.2:3b", 
-                 planner_model: str = "llama3.2:1b",
-                 decomp_model: str = "mistral:7b",
-                 **kwargs):
+    Answer succinctly and directly, using the provided context and information.
+    """
+
+    def __init__(self, **config: Dict[str, Any]):
         """
         Initializes the CoreModel with a prompt template and model name.
         Args:
-            prompt_template (str): The template for the prompt.
-            model_name (str): The name of the model to use.
-            kwargs: Additional keyword arguments for model configuration.
+            config (Dict): Configuration dictionary containing model hyperparameters.
         """
-        self.model = ChatOllama(model=model,
-                                **kwargs)  # Initialize the model with the given name and additional parameters
         
-        self.planner_model = planner.PlannerModel(
-            system_prompt=planner.default_planner_prompt(),
-            model_name=planner_model,
-            temperature=kwargs.get("temperature", 0.1),
-            num_ctx=kwargs.get("max_tokens", 20000),
-        )
-        self.decomp_model = task_decomp.TaskDecompositionModel(
-            system_prompt=task_decomp.decomp_prompt,
-            model=decomp_model,
-            temperature=kwargs.get("temperature", 0.1),
-            num_ctx=kwargs.get("max_tokens", 20000),
-        )
+        self.metadata = config.get("metadata", {})
+        self.model_params = config.get("params", {})
+        self.logging = config.get("logs", {})
         
-        self.prompt_template = prompt_template
-        self.chain = RunnableSequence(
-            {
-                "input": lambda x: x["input"],
-                "question_trace": lambda x: x["question_trace"],
-                "answer_trace": lambda x: x["answer_trace"],
-            },
-            # include planner before sending it to the model
-            self.prompt_template | self.decomp_model \
-            | RunnableLambda(lambda subqs: list(map(self.planner_model.invoke, subqs))) \
-            |self.model
-        )
+        self.system_prompt = config.get("system_prompt", self.default_system_prompt)
+        self.system_message = SystemMessage(content=self.system_prompt)
         
+        self.model = init_chat_model(**self.model_params)
+        self.bound_model = None
+        
+        
+    def build_chat_prompt(self, messages: list[ChatMessage]):
         """
-        IDEA: consider making planner model create a runnable sequence chain
+        Builds the chat prompt template for the core model.
+        
+        Returns:
+            ChatPromptTemplate: The constructed chat prompt template.
         """
-    def invoke(self, input_data: dict):
+        return ChatPromptTemplate.from_messages(
+            [
+                self.system_message,
+                HumanMessagePromptTemplate.from_template(self.default_user_prompt),
+                AIMessagePromptTemplate.from_template("{output}"),
+            ]
+        )
+    
+    def invoke(self, messages: list[ChatMessage]) -> str:
         """
         Invokes the core model with the provided input data.
         Args:
-            input_data (dict): A dictionary containing the input data for the model.
+            messages (list[ChatMessage]): A list of chat messages from the conversation.
         Returns:
-            The output from the model after processing the input.
+            The output from the model after processing the messages.
         """
-        return self.chain.invoke(input_data)
+        if self.bound_model:
+            # If the model is bound to tools, use the bound model
+            return self.bound_model.invoke(messages)
+        else:
+            return self.model.invoke(messages)
     
     def stream(self, input_data:dict):
         """
@@ -78,112 +97,61 @@ class CoreModel:
             A generator that yields chunks of output from the model.
         """
         return self.chain.stream(input_data)
+    
+    def cleanup(self):
+        """
+        Cleans up the resources used by the core model.
+        This method can be extended to release any resources or connections held by the model.
+        """
+        # Placeholder for cleanup logic if needed in the future
+        pass
+    
+    def __call__(self, state: State):
+        """
+        Calls the core model with the provided state.
+        Args:
+            state (State): The state object containing the input data and other relevant information.
+        Returns:
+            The output from the core model after processing the state.
+        """
+        return {"messages": [self.invoke(state["messages"])]}
+    
+    def bind_tools(self, tools: list):
+        """
+        Binds the tools to the core model.
+        Args:
+            tools (list): A list of tools to bind to the core model.
+        Returns:
+            The core model with the tools bound.
+        """
         
-def get_core_prompt():
-    """
-    Base system prompt for the core model (for prototyping purposes).
-    Returns:
-        str: The system prompt for the core model.
-    """
-    prompt = """
-    You are a research agent. Your task is to answer user questions and queries.
-    You also have helper models that provide additional context and information,
-    such as summarization, search, and decomposition.
-    
-    You will be provided with a user's question followed by at least one of the following:
-    - a summary of the context
-    - a set of potentially relevant documents
-    - a decomposition of the question into sub-questions
-    
-    You should use these to answer the question to the best of your ability.
+        self.bound_model = self.model.bind_tools(tools)
+        return self
 
-    Answer succinctly and directly, using the provided context and information.
-    If you do not know the answer, say "I don't know" or "I cannot answer that question".
-    """
-    
-    return prompt
-
-def main_loop(args):
-    """
-    Main loop for the core model.
-    Args:
-        args: Command line arguments for the model configuration.
-    """
-    prompt_template = ChatPromptTemplate.from_messages(
-        [
-            SystemMessagePromptTemplate.from_template(args.prompt_template),
-            HumanMessagePromptTemplate.from_template("{input}"),
-            AIMessagePromptTemplate.from_template("{context}")
-        ]
-    )
-    # Initialize the core model with the provided arguments
-    # prompt_decomposition_model = task_decomp.TaskDecompositionModel(
-    #     system_prompt=task_decomp.decomp_prompt,
-    #     model=args.decomp_model,
-    #     temperature=args.temperature,
-    #     num_ctx=args.max_tokens,
-    # )
-    
-    # planner_model = planner.PlannerModel(
-    #     system_prompt=planner.default_planner_prompt(),
-    #     model_name=args.planner_model,
-    #     temperature=args.temperature,
-    #     num_ctx=args.max_tokens,
-    # )
-    
-    core_model = CoreModel(
-        prompt_template=prompt_template,
-        model=args.model,
-        planner_model=args.planner_model,
-        decomp_model=args.decomp_model,
-        temperature=args.temperature,
-        num_ctx=args.max_tokens,
-    )
-    
-    question_trace = []
-    answer_trace = []
-    
-    while True:
-        # Get user input
-        print()
-        user_input = input(">>> ")
-        if user_input.lower() == 'exit':
-            break
+    def chatbot(self, state: State):
+        """
+        Chatbot function that processes the input state and returns the response.
         
-        # Prepare the input data for the model
-        input_data = {
-            "input": user_input,
-            "question_trace": question_trace,
-            "answer_trace": answer_trace
+        Args:
+            state (State): The current state of the chatbot.
+            
+        Returns:
+            dict: A dictionary containing the response from the core model.
+        """
+        execution_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        start_time = time.time()
+        result = [self.invoke(state["messages"])]
+        execution_time = time.time() - start_time
+        
+        return {
+            "messages": result,
+            "metadata": {
+                "execution_date": execution_date,
+                "execution_time": execution_time,
+                "output": result.__repr__(),
+                "model_name": self.metadata.get("model_name"),
+                "type": self.metadata.get("type", "core_model"),
+                "args": state["messages"].__repr__(),
+                "version_name": self.metadata.get("version_name")
+            }
         }
-    
-        # Invoke the core model and print the output
-        output = core_model.stream(input_data)
-        print()
-        for chunk in output:
-            if chunk is not None:
-                print(chunk.content, end='', flush=True)
-        print()
-        
-        # Update the traces with the new question and answer
-        question_trace.append(user_input)
-        answer_trace.append(output)
-
-if __name__ == "__main__":
-    # parse args
-    parser = ArgumentParser(description="Core Model for Research Agent")
-    parser.add_argument("--core_model", type=str, default="llama3.2:3b",
-                        help="Name of the model to use (default: llama3.2:3b)")
-    parser.add_argument("--planner_model", type=str, default="llama3.2:1b",
-                        help="Name of the planner model to use (default: llama3.2:1b)")
-    parser.add_argument("--decomp_model", type=str, default="mistral:7b",
-                        help="Name of the task decomposition model to use (default: mistral:7b)")
-    parser.add_argument("--prompt_template", type=str, default=get_core_prompt(),
-                        help="Prompt template for the model (default: base system prompt)")
-    parser.add_argument("--temperature", type=float, default=0.1,
-                        help="Temperature for the model (default: 0.1)")
-    parser.add_argument("--max_tokens", type=int, default=20000,
-                        help="Maximum tokens for the model (default: 20000)")
-    args = parser.parse_args()
-
-    main_loop(args)
