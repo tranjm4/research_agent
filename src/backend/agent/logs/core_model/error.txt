@@ -1,0 +1,5 @@
+Error: Object of type HumanMessage is not JSON serializable
+Error: Object of type HumanMessage is not JSON serializable
+Error: Object of type HumanMessage is not JSON serializable
+Error: Object of type HumanMessage is not JSON serializable
+Error: Object of type HumanMessage is not JSON serializable
