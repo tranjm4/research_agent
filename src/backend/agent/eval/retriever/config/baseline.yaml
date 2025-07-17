@@ -1,0 +1,23 @@
+metadata:
+  name: "baseline"
+  version: "0"
+  num_parameters: 0
+  type: "baseline"
+
+model_kwargs:
+  model: None
+  temperature: None
+  top_p: None
+  top_k: None
+  num_ctx: None
+  system_prompt: None
+
+search_params:
+  num_search: 9
+  docs_per_shard: 1
+
+eval_params:
+  eval_model: "mistral:7b"
+  num_samples: 40
+  sample_file: "sample_prompts.txt"
+  save_file: "eval_metrics_baseline.json"

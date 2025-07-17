@@ -1,0 +1,23 @@
+metadata:
+  name: "crossencoder_MiniLM_L12"
+  version: "0"
+  num_parameters: 0
+  type: "crossencoder"
+
+model_kwargs:
+  model: "cross-encoder/ms-marco-MiniLM-L12-v2"
+  temperature: None
+  top_p: None
+  top_k: None
+  num_ctx: None
+  system_prompt: None
+
+search_params:
+  num_search: 5
+  docs_per_shard: 3
+
+eval_params:
+  eval_model: "mistral:7b"
+  num_samples: 40
+  sample_file: "sample_prompts.txt"
+  save_file: "crossencoder_MiniLM_L12.json"
