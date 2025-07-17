@@ -1,256 +1,74 @@
 """
 File: agent/tools/search.py
 
-This module defines a search model for the agent, which is used to retrieve relevant information from a vector store.
+This module defines the Search tool for performing web searches using the DuckDuckGoSearchRun module.   
 """
 
-from agent.tools.wrapper import ModelWrapper
-from langchain_core.runnables import RunnableLambda
-from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
+from langchain_core.tools import tool
 
-from agent.tools.rag.prompting import keyword_decomposition
-from agent.tools.rag.retriever import Retriever
+from ddgs import DDGS
 
 from dotenv import load_dotenv
 load_dotenv()
 
-class SearchModel(ModelWrapper):
+from agent.utils import log_stats
+
+class SearchTool:
     """
-    A model wrapper for the search functionality, allowing the agent to search through a vector store.
+    A tool for performing search operations.
+    
+    It uses the DuckDuckGoSearchRun tool to perform internet searches
     """
-    default_prompt = """
-    You are a search expert in various academic domains.
-    Your task is to select the most relevant documents from a
-    given list of documents based on the provided user input.
     
-    You will be given a user prompt, followed by a numbered list of documents, each with a URL and its abstract.
-    Your task is to select the top 3 most relevant documents based on the user prompt.
-    
-    Your job is to return a list of the top {num_search} document numbers.
-    Under any circumstances, do not return more than {num_search} documents.
-    Under any circumstances, do not include any other text or information in your response.
-    
-    Example input:
-    User prompt: "What are the latest advancements in quantum computing and cybersecurity?" (Find 3 relevant documents)
-    Documents:
-    1. URL: https://example.com/doc1 - Abstract: "This paper discusses the latest advancements in quantum computing, including new algorithms and hardware improvements..."
-    2. URL: https://example.com/doc2 - Abstract: "This article reviews the current state of quantum computing research and its implications for the future."
-    3. URL: https://example.com/doc3 - Abstract: "This paper presents a comprehensive overview of quantum machine learning techniques and their applications."
-    4. URL: https://example.com/doc4 - Abstract: "This study explores the challenges and opportunities in quantum computing, focusing on scalability and error correction."
-    5. URL: https://example.com/doc5 - Abstract: "This article provides a detailed analysis of quantum cryptography and its potential impact on secure communications."
-    6. URL: https://example.com/doc6 - Abstract: "This paper examines the role of quantum computing in solving complex optimization problems and its applications in various fields."
-    7. URL: https://example.com/doc7 - Abstract: "This research explores the intersection of quantum computing and artificial intelligence, highlighting recent breakthroughs and future directions."
-    8. URL: https://example.com/doc8 - Abstract: "This paper discusses the implications of quantum computing for cybersecurity and data privacy."
-    9. URL: https://example.com/doc9 - Abstract: "This article reviews the latest developments in quantum hardware, including superconducting qubits and ion traps."
-    
-    Example output:
-    [2, 5, 8]
-    
-    Reasoning (not to be included in the output):
-    - The user prompt is focused on advancements in quantum computing and cybersecurity.
-    - Document 2 provides a general overview of quantum computing research, which is relevant but less specific than the other two.
-    - Document 5 discusses quantum cryptography, which is directly related to cybersecurity.
-    - Document 8 discusses the implications of quantum computing for cybersecurity, making it relevant.
-    
-    Under any circumstances, do not return more than {num_search} documents.
-    Under any circumstances, do not include any other text or information in your response.
-    """
-
-    def __init__(self, system_prompt: str, model: str = "llama3.2:3b", num_search: int = 3, **kwargs):
+    def __init__(self, **config):
         """
-        Initializes the SearchModel with a prompt template and model name.
-        Args:
-            system_prompt (str): The template for the prompt.
-            model (str): The name of the ChatOllama model to use.
-            num_search (int): The number of documents to return from the search.
+        Initializes the SearchTool with the DuckDuckGoSearchRun tool.
         """
-        self.num_search = num_search
-        self.input_template = lambda x: {
-            "input": x["input"]
-        }
-        self.vector_db = Retriever()
+        params = config.get("params", {})
         
-        self.parse_func = RunnableLambda(lambda x: x)
+        self.search = DDGS()
+        self.num_results = params.get("num_results", 5)
         
-
-        super().__init__(
-            agent_type="search",
-            system_prompt=system_prompt,
-            input_template=self.input_template,
-            model=model,
-            parse_func=self.parse_func,
-            **kwargs
-        )
+        self.metadata = config.get("metadata", {})
+        self.logging = config.get("logs", {})
         
-        self.prompt_template = self.build_prompt_template(SearchModel.default_prompt)
+        if not self.logging:
+            print("No logging configuration provided. Please check your config file.\n")
+            raise ValueError(f"No logging configuration provided. Config: {config}")
         
-        self.chain = RunnableLambda(lambda x: x["input"]) \
-            | RunnableLambda(lambda x: self.search_db(x)) \
-            | RunnableLambda(lambda x: self.parse_search_results(x)) \
-            | RunnableLambda(lambda x: self.run_model(x)) \
-            | RunnableLambda(lambda x: self.log_stats(x)) \
-            | RunnableLambda(lambda x: self.parse_model_output(x))
-            
-    def search_db(self, query: str) -> dict:
+        # self.log_stats = log_stats(self.metadata, self.logging["out_file"], self.logging["err_file"])
+        # self.query = self.log_stats(self._query)
+        self.query = self._query
+    
+    def _query(self, prompt: str) -> list:
+        return self.search.text(prompt, max_results=self.num_results)
+    
+    def as_tool(self):
         """
-        Searches the vector store for relevant documents based on the user query.
-        
-        Args:
-            query (str): The user input to search for in the vector store.
+        Returns the SearchTool as a LangChain tool.
         
         Returns:
-            dict: A dictionary containing the user input and the search results,
-            with keys:
-            {
-                "user_input": str,
-                "search_results": list[Document]
-            }
-                which will be passed through the chain.
+            RunnableLambda: A runnable that performs the search operation.
         """
-        results = self.vector_db.invoke(query)
-        return {
-            "user_input": query,
-            "search_results": results
-        }
-    
-    def parse_search_results(self, x: dict) -> dict:
-        """
-        Parses the search results to extract relevant information.
+        @tool(name_or_callable="search_tool",
+              description="Searches the web for information based on the input query.",
+              parse_docstring=True)
+        def search_tool(query: str) -> list:
+            """Performs a search operation using the DuckDuckGoSearchRun tool.
 
-        Args:
-            x (dict): A dictionary containing the passed variables in the chain
-            with keys:
-                - "user_input" (str): The user input string.
-                - "search_results" (list[Document]): A list of Document objects containing the search results.
+            This tool uses the DuckDuckGoSearch (ddgs) module to perform searches on the web.
 
-        Returns:
-            dict: {
-                "user_input": str,
-                "search_results": list[Document],
-                "parsed_search_results": str
-            }
-        """
-        search_results = x["search_results"]
-        
-        x["parsed_search_results"] = "\n".join(
-            [f"{i+1}. URL: {doc.metadata['url']} - Abstract: {doc.page_content}" for i, doc in enumerate(search_results)]
-        )
-        
-        return x
-    
-    def run_model(self, x: dict) -> dict:
-        """
-        Runs the search model on the provided input.
-        Args:
-            x (dict): A dictionary containing the input data with keys:
-                - "user_input" (str): The user input string.
-                - "search_results" (list[Document]): A list of Document objects containing the search results.
-                - "parsed_search_results" (str): The parsed search results string.
-            
-        Returns:
-            dict: The output from the model, which will be passed through the chain.
-            {
-                "user_input": str
-                "search_results": list[Document],
-                "parsed_search_results": str,
-                "model_output": str
-            }
-        """
-        chat_prompt_template = ChatPromptTemplate.from_messages(
-            [
-                SystemMessagePromptTemplate.from_template(SearchModel.default_prompt),
-                HumanMessagePromptTemplate.from_template("User Prompt: {user_input} (Find {num_search} relevant documents)\n"
-                                                         "Documents: \n{input}"),
-            ]
-        )
-        
-        prompt = chat_prompt_template.invoke(
-            {
-                "user_input": x["user_input"],
-                "num_search": self.num_search,
-                "input": x["parsed_search_results"]
-            }
-        )
-        
-        output = self.model.invoke(prompt)
-        
-        x["model_output"] = output
-        return x
-    
-    def log_stats(self, x: dict) -> dict:
-        """
-        Logs the statistics of the search model output.
-        
-        Args:
-            x (dict): A dictionary containing the input data with keys:
-                - "user_input" (str): The user input string.
-                - "search_results" (list[Document]): A list of Document objects containing the search results.
-                - "parsed_search_results" (str): The parsed search results string.
-                - "prompt" (str): The chat prompt to be sent to the model.
-                - "model_output" (OllamaChatCompletion): The output from the model.
-        
-        Returns:
-            dict: The input data with an additional key for logging purposes.
-        """
-        super().log_stats(x["model_output"])
-        return x
+            Args:
+                query (str): The search query to call the DuckDuckGoSearchRun tool with.
 
-    def parse_model_output(self, x: dict) -> dict:
-        """
-        Parses the model output to extract the top 3 document numbers.
-        
-        Args:
-            x (dict): A dictionary containing the input data with keys:
-                - "user_input" (str): The user input string.
-                - "search_results" (list[Document]): A list of Document objects containing the search results.
-                - "parsed_search_results" (str): The parsed search results string.
-                - "prompt" (str): The chat prompt to be sent to the model.
-                - "model_output" (OllamaChatCompletion): The output from the model.
-        
-        Returns:
-            dict: The input data with an additional key "content" containing the parsed model output.
-            {
-                "user_input": str,
-                "search_results": list[Document],
-                "parsed_search_results": str,
-                "prompt": str,
-                "model_output": OllamaChatCompletion,
-                "content": list[Document]
-            }
-        """
-        try:
-            # Extract the document numbers from the model output
-            doc_numbers = [int(num)-1 for num in x["model_output"].content.strip().strip("[]").split(",")]
-            
-            documents_list = x["search_results"]
-            
-            parsed_model_output = []
-            for num in doc_numbers:
-                parsed_model_output.append(documents_list[num])
-                
-            x["content"] = parsed_model_output
-                
-            return x
-                
-        except ValueError as e:
-            print(f"Error parsing model output: {e}")
-            return []
-        
+            Returns:
+                list: A list of search results, each containing a title, URL, and snippet.
+            """
+            return self.query(query)
+
+        return search_tool
+
+
 if __name__ == "__main__":
-    search_model = SearchModel(system_prompt=SearchModel.default_prompt, 
-                               version_name="search/mistal:7b",
-                               model="mistral:7b",
-                               num_search=5,
-                               num_ctx=20000, 
-                               temperature=0.1)
-    input_prompt = {
-        "input": "What are language models' applications in education?"
-    }
-
-    result = search_model.invoke(input_prompt)
-    for r in result["content"]:
-        print()
-        print(f"Document URL: {r.metadata['url']}")
-        print()
-        print(f"Document Abstract: {r.page_content}\n")
-        print("---"*20)
+    search_tool = SearchTool()
+    results = search_tool.invoke()
