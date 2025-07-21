@@ -20,8 +20,8 @@
 		"@eslint/js": "^9.18.0",
 		"@fontsource/fira-mono": "^5.0.0",
 		"@neoconfetti/svelte": "^2.0.0",
-		"@sveltejs/adapter-node": "^5.2.12",
-		"@sveltejs/kit": "^2.22.0",
+		"@sveltejs/adapter-node": "^0.0.18",
+		"@sveltejs/kit": "^2.25.1",
 		"@sveltejs/vite-plugin-svelte": "^6.0.0",
 		"@vitest/browser": "^3.2.3",
 		"eslint": "^9.18.0",
@@ -38,5 +38,9 @@
 		"vite": "^7.0.4",
 		"vitest": "^3.2.3",
 		"vitest-browser-svelte": "^0.1.0"
+	},
+	"dependencies": {
+		"dompurify": "^3.2.6",
+		"marked": "^16.1.1"
 	}
 }
