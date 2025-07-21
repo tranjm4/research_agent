@@ -18,7 +18,7 @@ import os
 
 from argparse import ArgumentParser
 
-class CoreModel:
+class CoreModel(ModelWrapper):
     """
     CoreModel class that initializes the core model for the agent.
     It sets up the model, prompt, and runnable sequence for processing input.
@@ -48,9 +48,11 @@ class CoreModel:
             config (Dict): Configuration dictionary containing model hyperparameters.
         """
         
-        self.metadata = config.get("metadata", {})
         self.model_params = config.get("params", {})
+        self.metadata = config.get("metadata", {})
         self.logging = config.get("logs", {})
+        
+        super().__init__(self.model_params, self.metadata, self.logging)
         
         self.system_prompt = config.get("system_prompt", self.default_system_prompt)
         self.system_message = SystemMessage(content=self.system_prompt)
@@ -73,85 +75,39 @@ class CoreModel:
                 AIMessagePromptTemplate.from_template("{output}"),
             ]
         )
-    
-    def invoke(self, messages: list[ChatMessage]) -> str:
-        """
-        Invokes the core model with the provided input data.
-        Args:
-            messages (list[ChatMessage]): A list of chat messages from the conversation.
-        Returns:
-            The output from the model after processing the messages.
-        """
-        if self.bound_model:
-            # If the model is bound to tools, use the bound model
-            return self.bound_model.invoke(messages)
-        else:
-            return self.model.invoke(messages)
-    
-    def stream(self, input_data:dict):
-        """
-        Streams the output from the core model based on the provided input data.
-        Args:
-            input_data (dict): A dictionary containing the input data for the model.
-        Returns:
-            A generator that yields chunks of output from the model.
-        """
-        return self.chain.stream(input_data)
-    
-    def cleanup(self):
-        """
-        Cleans up the resources used by the core model.
-        This method can be extended to release any resources or connections held by the model.
-        """
-        # Placeholder for cleanup logic if needed in the future
-        pass
-    
-    def __call__(self, state: State):
-        """
-        Calls the core model with the provided state.
-        Args:
-            state (State): The state object containing the input data and other relevant information.
-        Returns:
-            The output from the core model after processing the state.
-        """
-        return {"messages": [self.invoke(state["messages"])]}
-    
-    def bind_tools(self, tools: list):
-        """
-        Binds the tools to the core model.
-        Args:
-            tools (list): A list of tools to bind to the core model.
-        Returns:
-            The core model with the tools bound.
-        """
-        
-        self.bound_model = self.model.bind_tools(tools)
-        return self
 
-    def chatbot(self, state: State):
-        """
-        Chatbot function that processes the input state and returns the response.
+    # def chatbot(self, state: State):
+    #     """
+    #     Chatbot function that processes the input state and returns the response.
         
-        Args:
-            state (State): The current state of the chatbot.
+    #     Args:
+    #         state (State): The current state of the chatbot.
             
-        Returns:
-            dict: A dictionary containing the response from the core model.
-        """
-        execution_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        start_time = time.time()
-        result = [self.invoke(state["messages"])]
-        execution_time = time.time() - start_time
+    #     Returns:
+    #         dict: A dictionary containing the response from the core model.
+    #     """
+    #     execution_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    #     start_time = time.time()
+    #     result = [self.invoke(state["messages"])]
+    #     execution_time = time.time() - start_time
         
-        return {
-            "messages": result,
-            "metadata": {
-                "execution_date": execution_date,
-                "execution_time": execution_time,
-                "output": result.__repr__(),
-                "model_name": self.metadata.get("model_name"),
-                "type": self.metadata.get("type", "core_model"),
-                "args": state["messages"].__repr__(),
-                "version_name": self.metadata.get("version_name")
-            }
-        }
+        
+    #     metadata = {}
+    #     metadata["execution_time"] = execution_time
+    #     metadata["execution_date"] = execution_date
+    #     for key in self.metadata:
+    #         if key not in state:
+    #             metadata[key] = self.metadata[key]
+        
+    #     return {
+    #         "messages": result,
+    #         "metadata": {
+    #             "execution_date": execution_date,
+    #             "execution_time": execution_time,
+    #             "output": result.__repr__(),
+    #             "model_name": self.metadata.get("model_name"),
+    #             "type": self.metadata.get("type", "core_model"),
+    #             "args": state["messages"].__repr__(),
+    #             "version_name": self.metadata.get("version_name")
+    #         }
+    #     }
