@@ -36,9 +36,8 @@ class SearchTool:
             print("No logging configuration provided. Please check your config file.\n")
             raise ValueError(f"No logging configuration provided. Config: {config}")
         
-        # self.log_stats = log_stats(self.metadata, self.logging["out_file"], self.logging["err_file"])
-        # self.query = self.log_stats(self._query)
-        self.query = self._query
+        self.log_stats = log_stats(self.metadata, self.logging["out_file"], self.logging["err_file"])
+        self.query = self.log_stats(self._query)
     
     def _query(self, prompt: str) -> list:
         return self.search.text(prompt, max_results=self.num_results)
