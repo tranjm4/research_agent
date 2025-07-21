@@ -14,11 +14,12 @@ import json
 
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, START, END
+from langchain.chat_models import init_chat_model
 
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableLambda
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import ChatMessage
 
 from typing import Annotated, Union, Optional, Dict, List
 from typing_extensions import TypedDict
@@ -171,11 +172,13 @@ class ModelWrapper:
     A wrapper class for LLM models that provides a standardized interface for invoking the model.
     """
 
-    def __init__(self, metadata, logging):
+    def __init__(self, model_params: Dict[str, Union[str, int]], metadata, logging):
+        self.model_params = model_params
         self.metadata = metadata
         self.logging = logging
         
-        
+        self.model = init_chat_model(**self.model_params)
+        self.bound_model = None
         
     def build_prompt_template(self, system_prompt: str) -> ChatPromptTemplate:
         """
@@ -189,19 +192,67 @@ class ModelWrapper:
 
         return ChatPromptTemplate.from_messages([system_message, human_message])
     
-    def invoke(self, input_data: dict):
+    def bind_tools(self, tools: list):
+        """
+        Binds the tools to the model, allowing it to invoke them when needed.
+        
+        Args:
+            tools (list): A list of tool objects that the model can invoke.
+        """
+        self.bound_model = self.model.bind_tools(tools)
+    
+    def node(self, state: State):
         """
         Invokes the tool model with the provided input data.
 
         Args:
-            input_data (dict): A dictionary containing the input data for the model.
-            The dict should have a key "input" with the input string.
+            state (State): The current state of the chatbot
 
         Returns:
             The output from the model after processing the input.
+            The metadata is updated with execution time and date.
+            The messages are updated with the model's response.
         """
-        # print(f"Invoking {self.agent_type} model with input: {input_data['input']}")
-        return self.chain.invoke(input_data)
+        start_time = time.time()
+        execution_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        
+        messages = state["messages"]
+        if not messages:
+            raise ValueError("No messages found in state")
+        
+        # Build the chat prompt template
+        # Invoke the model with the chat prompt
+        result = self.invoke(messages)
+        
+        # Log the execution time and metadata
+        execution_time = time.time() - start_time
+        
+        metadata = {
+            "execution_time": execution_time,
+            "execution_date": execution_date,
+            **self.metadata
+        }
+        
+        return {
+            "messages": [result],
+            "metadata": metadata
+        }
+    
+    def invoke(self, messages: list[ChatMessage]) -> str:
+        """
+        Invokes the tool model with the provided input data.
+        
+        Args:
+            messages (list[ChatMessage]): A list of chat messages from the conversation.
+        
+        Returns:
+            The output from the model after processing the messages.
+        """
+        if self.bound_model:
+            # If the model is bound to tools, use the bound model
+            return self.bound_model.invoke(messages)
+        else:
+            return self.model.invoke(messages)
     
     def stream(self, input_data: dict):
         """
@@ -213,11 +264,14 @@ class ModelWrapper:
         Returns:
             A generator that yields chunks of output from the model.
         """
-        for chunk in self.chain.stream({"input": input_data}):
-            yield chunk
+        if self.bound_model:
+            # If the model is bound to tools, use the bound model
+            return self.bound_model.stream(input_data)
+        else:
+            return self.model.stream(input_data)
         
         
-class ParallelNode():
+class ParallelNode:
     """
     A node that runs multiple Nodes in parallel.
     """
@@ -253,38 +307,3 @@ class ParallelNode():
         graph.add_edge("aggregator", END)
         graph = graph.compile(checkpointer=None)
         return graph
-    
-def call1(state: State):
-    """
-    A sample function to demonstrate a callable node.
-    
-    Args:
-        state (State): The current state of the graph.
-    
-    Returns:
-        State: The updated state with a message.
-    """
-    return {"messages": ["1st call"]}
-
-def call2(state: State):
-    """
-    Another sample function to demonstrate a callable node.
-    
-    Args:
-        state (State): The current state of the graph.
-    
-    Returns:
-        State: The updated state with a message.
-    """
-    return {"messages": ["2nd call"]}
-    
-if __name__ == "__main__":
-    c1 = RunnableLambda(lambda x: call1(x))
-    c2 = RunnableLambda(lambda x: call2(x))
-    c3 = RunnableLambda(lambda x: {"messages": ["3rd call"]})
-    parallel_node = ParallelNode([c1, c2, c3])
-
-    result = parallel_node.graph.invoke({"input": None, "messages": []})
-    
-    for r in result["messages"]:
-        print(r)
