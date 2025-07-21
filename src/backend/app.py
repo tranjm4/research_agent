@@ -82,10 +82,6 @@ app.add_middleware(
 
 class PromptRequest(BaseModel):
     user_input: str
-    
-class ChatResponse(BaseModel):
-    response: str = Field(..., description="Agent's response to the user input")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional response metadata")
 
 @app.post("/chat")
 async def chat(prompt_request: PromptRequest):
@@ -134,17 +130,5 @@ async def chat(prompt_request: PromptRequest):
         },
         media_type="text/plain"
     )
-    
-    response = GRAPH["graph"].invoke({"messages": [{"role": "user", "content": user_input}]},
-                                 config={"configurable": {"thread_id": "1"}},)
-    ai_response = response["messages"][-1].content
-    return ChatResponse(
-            response=ai_response,
-            metadata={
-                "input_length": len(user_input),
-                "response_length": len(ai_response) if isinstance(ai_response, str) else None,
-                # Add any other metadata to return here
-            }
-        )
     
     # TODO: Log the response and metadata to the database
