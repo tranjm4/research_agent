@@ -4,6 +4,8 @@ params:
   top_p: 0.9
   max_retries: 1
 
+system_prompt: "core1.txt"
+
 metadata:
   model_name: "openai:gpt-4.1-nano"
   type: "core"
