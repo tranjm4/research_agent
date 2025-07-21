@@ -39,17 +39,20 @@ class Graph(StateGraph):
         super().__init__(State)
         
         self.config = config
+        system_prompt = load_file(config["core_config"]["system_prompt"])
+        config["core_config"]["system_prompt"] = system_prompt
         
         self.core_model = CoreModel(**config["core_config"])
+        
 
         tools = [
             Retriever(**config["retriever_config"]).as_tool(),
             SearchTool(**config["search_config"]).as_tool()
         ]
         self.tool_node = ToolNode(tools=tools)
-        self.core_model = self.core_model.bind_tools(tools)
+        self.core_model_with_tools = self.core_model.bind_tools(tools)
         
-        self.add_node("core_model", self.core_model.chatbot)
+        self.add_node("core_model", self.core_model.node)
         self.add_node("tools", self.tool_node)
         self.add_node("logging", self.log)
         
@@ -143,54 +146,8 @@ def route_tools(state: State) -> Optional[str]:
     if hasattr(ai_message, "tool_calls") and len(ai_message.tool_calls) > 0:
         return "tool_node"
     return END
-    
-def build_graph(config: Optional[Dict[str, Union[str, int]]] = None) -> StateGraph:
-    """
-    Builds the LangGraph graph for the agent.
-    
-    Returns:
-        StateGraph: The constructed graph with nodes and edges.
-    """
-    
-    print("Building LangGraph agent...")
-    graph = StateGraph(State)
-    
-    core_model_config = config["core_config"]
-    retriever_config = config["retriever_config"]
-    search_config = config["search_config"]
-    
-    core_model = CoreModel(**core_model_config)
 
-    search = SearchTool(**search_config)
-    search_tool = search.as_tool()
-
-    retriever = Retriever(**retriever_config)
-    retriever_tool = retriever.as_tool()
-    
-    tools = [retriever_tool, search_tool]
-    
-    tool_node = ToolNode(tools=tools)
-    core_model = core_model.bind_tools(tools)
-    
-    def chatbot(state: State):
-        return {"messages": [core_model.invoke(state["messages"])]}
-
-    graph.add_node("core_model", chatbot)
-    graph.add_node("tools", tool_node)
-    
-    graph.add_edge(START, "core_model")
-    graph.add_conditional_edges(
-        "core_model", 
-        tools_condition
-    )
-    graph.add_edge("tools", "core_model")
-    graph.add_edge("core_model", END)
-    
-    memory = MemorySaver()
-    graph = graph.compile(checkpointer=memory)
-    return graph
-
-def main_loop(graph: StateGraph, verbose=True):
+def __main_loop(graph: StateGraph, verbose=True):
     """
     Main loop to run the LangGraph agent.
     
@@ -254,3 +211,17 @@ def _stream_non_verbose(graph, user_input):
             continue
         
     print()
+    
+def load_file(file_path: str) -> str:
+    """
+    Loads the content of a file.
+    
+    Args:
+        file_path (str): The path to the file to load.
+        
+    Returns:
+        str: The content of the file.
+    """
+    base_path = Path(__file__).parent
+    with open(base_path / "prompts" / file_path, "r") as f:
+        return "\n".join([line.strip() for line in f.readlines() if line.strip()])  # Remove empty lines and strip whitespace
