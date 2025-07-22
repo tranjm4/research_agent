@@ -1,7 +1,6 @@
 package userauth
 
 import (
-	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,7 +20,6 @@ func TestDBConnection(t *testing.T) {
 	assert.NotNil(assert, "Database connection should not be nil")
 
 	dbUrl := utils.GetDBUrl("../../.env")
-	log.Println("Database URL:", dbUrl)
 	assert.NotEmpty(dbUrl, "Database URL should not be empty")
 
 	// Attempt to connect to the database

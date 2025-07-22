@@ -21,6 +21,7 @@ package userauth
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 
 	"log"
@@ -42,6 +43,17 @@ func RegisterRoutes(r chi.Router, db *sql.DB) {
 	// Additional routes can be added here as needed
 }
 
+type RegisterRequest struct {
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 // postLogin handles user login
 // It should validate the credentials, generate a session token, and return it to the client.
 // It can also set a cookie with the session token for subsequent requests.
@@ -51,21 +63,27 @@ func postLogin(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// handle user login logic
 		// Collect request data
-		username := r.FormValue("username")
-		email := r.FormValue("email")
-		password := r.FormValue("password")
-		if (username == "" && email == "") || password == "" {
-			log.Println("Username or email or password is empty")
-			http.Error(w, "Username or email or password is required", http.StatusBadRequest)
+		var request LoginRequest
+		err := json.NewDecoder(r.Body).Decode(&request)
+		if err != nil {
+			log.Println("Failed to decode request body (Invalid JSON body):", err)
+			http.Error(w, "Invalid JSON request body", http.StatusBadRequest)
+			return
+		}
+		username := request.Username
+		password := request.Password
+		if username == "" || password == "" {
+			log.Println("Username or password is empty")
+			http.Error(w, "Username or password is required", http.StatusBadRequest)
 			return
 		}
 
 		// Validate credentials
 		// verify the user exists
-		userValidateQuery := `SELECT password_hash FROM users WHERE username = $1 OR email = $2`
+		userValidateQuery := `SELECT password_hash FROM users WHERE username = $1 OR email = $1`
 		// if query returns no rows, user does not exist
 		var hashedPassword string
-		err := db.QueryRow(userValidateQuery, username, email).Scan(&hashedPassword)
+		err = db.QueryRow(userValidateQuery, username).Scan(&hashedPassword)
 		if err == sql.ErrNoRows {
 			log.Printf("User %s not found", username)
 			http.Error(w, "Invalid username or password", http.StatusUnauthorized)
@@ -80,7 +98,7 @@ func postLogin(db *sql.DB) http.HandlerFunc {
 
 		// If we reach this point, the user is authenticated
 		// Generate a session token and return it to the client
-		webToken, err := generateSessionToken(username, db)
+		sessionToken, err := generateSessionToken(username, db)
 		if err != nil {
 			log.Printf("Failed to generate session token for user %s: %v", username, err)
 			http.Error(w, "Failed to generate session token", http.StatusInternalServerError)
@@ -89,9 +107,13 @@ func postLogin(db *sql.DB) http.HandlerFunc {
 
 		// Set the session token in a cookie
 		http.SetCookie(w, &http.Cookie{
-			Name:  "session_token",
-			Value: webToken,
-			Path:  "/",
+			Name:     "session_token",
+			Value:    sessionToken,
+			Path:     "/",                            // Set the cookie path to root so it's accessible across the site
+			HttpOnly: true,                           // Prevent JavaScript access to the cookie
+			Secure:   true,                           // Use secure cookies in production
+			Expires:  time.Now().Add(24 * time.Hour), // Set cookie expiration to 24 hours
+			SameSite: http.SameSiteLaxMode,           // Use Lax SameSite policy for CSRF protection
 		})
 
 		// Return a success response
@@ -151,9 +173,16 @@ func postRegister(db *sql.DB) http.HandlerFunc {
 		validateQuery := `SELECT COUNT(*) FROM users WHERE username = $1 OR email = $2`
 		var count int
 
-		username := r.FormValue("username")
-		email := r.FormValue("email")
-		password := r.FormValue("password")
+		var request RegisterRequest
+		err := json.NewDecoder(r.Body).Decode(&request)
+		if err != nil {
+			log.Println("Failed to decode request body (Invalid JSON body):", err)
+			http.Error(w, "Invalid JSON request body", http.StatusBadRequest)
+			return
+		}
+		username := request.Username
+		email := request.Email
+		password := request.Password
 
 		if username == "" || email == "" || password == "" {
 			log.Println("Username, Email, or Password is empty")
@@ -161,7 +190,7 @@ func postRegister(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		err := db.QueryRow(validateQuery, username, email).Scan(&count)
+		err = db.QueryRow(validateQuery, username, email).Scan(&count)
 		if err != nil {
 			log.Printf("Error checking user existence: %v", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -201,9 +230,13 @@ func postRegister(db *sql.DB) http.HandlerFunc {
 		}
 		// Set the session token in a cookie
 		http.SetCookie(w, &http.Cookie{
-			Name:  "session_token",
-			Value: sessionToken,
-			Path:  "/",
+			Name:     "session_token",
+			Value:    sessionToken,
+			Path:     "/",                            // Set the cookie path to root so it's accessible across the site
+			HttpOnly: true,                           // Prevent JavaScript access to the cookie
+			Secure:   true,                           // Use secure cookies in production
+			Expires:  time.Now().Add(24 * time.Hour), // Set cookie expiration to 24 hours
+			SameSite: http.SameSiteLaxMode,           // Use Lax SameSite policy for CSRF protection
 		})
 
 		// Send a confirmation email if needed
