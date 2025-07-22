@@ -19,15 +19,15 @@ from langchain_core.runnables import RunnableSequence, RunnableLambda
 from langchain_core.tools import tool
 
 
-from agent.utils import ModelWrapper, State
-from agent.core_model import CoreModel
-from agent.tools.retriever import Retriever
-from agent.tools.search import SearchTool
+from utils import ModelWrapper, State
+from core_model import CoreModel
+from tools.retriever import Retriever
+from tools.search import SearchTool
 
 from pathlib import Path
 import json
 
-from agent.utils import VERBOSE
+from utils import VERBOSE
 
 class Graph(StateGraph):
     """

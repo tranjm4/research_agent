@@ -1,11 +1,11 @@
-from agent.tools.rag.vectorstore.vector_db import load_db
+from tools.rag.vectorstore.vector_db import load_db
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sentence_transformers import CrossEncoder
 
 from langchain_core.tools import tool
 
-from agent.utils import ModelConfig, log_stats
+from utils import ModelConfig, log_stats
 
 class Retriever:
     """

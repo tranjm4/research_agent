@@ -11,7 +11,7 @@ from ddgs import DDGS
 from dotenv import load_dotenv
 load_dotenv()
 
-from agent.utils import log_stats
+from utils import log_stats
 
 class SearchTool:
     """
