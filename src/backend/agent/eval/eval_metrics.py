@@ -9,7 +9,7 @@ as well as to evaluate the agent's performance based on the number of relevant d
 from datetime import datetime
 from argparse import ArgumentParser
 from langchain_ollama import ChatOllama
-from rag.retriever import Retriever
+from tools.retriever import Retriever
 
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingWrapper

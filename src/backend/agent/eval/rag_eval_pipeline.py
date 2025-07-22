@@ -13,7 +13,7 @@ import eval_metrics
 from argparse import ArgumentParser
 from datetime import datetime
 from langchain_ollama import ChatOllama
-from rag.retriever import Retriever
+from tools.retriever import Retriever
 
 def process_args():
     """
