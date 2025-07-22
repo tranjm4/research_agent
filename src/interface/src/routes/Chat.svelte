@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 
 	const API_BASE_URL: string = 'http://localhost:8000';
 
@@ -42,7 +44,7 @@
 			content,
 			type,
 			timestamp: new Date(),
-			isStreaming: type === 'bot' && content === '' // If type is 'bot' and content is empty, it's a streaming message
+			isStreaming: type === 'bot' && content === '' // If type is "bot" and content is empty, it"s a streaming message
 		};
 
 		messages = [...messages, message];
@@ -56,6 +58,10 @@
 	): void {
 		messages = messages.map((msg) => {
 			if (msg.id === messageId) {
+				// parse the markdown content if needed
+				const markedContent: Promise<string> | string = marked.parse(newContent);
+				// purify the content to prevent XSS attacks
+				msg;
 				return {
 					...msg,
 					content: newContent,
@@ -133,8 +139,8 @@
 								const tokenJSON: APIResponse = JSON.parse(token);
 								const tokenText: string = tokenJSON.content;
 								if (tokenText === '') {
-									accumulatedContent += '<br>'; // Handle empty content
-									streamingContent += '<br>';
+									// accumulatedContent += ""; // Handle empty content
+									// streamingContent += "<br/>";
 								} else {
 									accumulatedContent += tokenText;
 									streamingContent += tokenText;
@@ -192,9 +198,9 @@
 		{/each}
 
 		{#if isLoading}
-			<div class="message bot">
+			<!-- <div class="message bot">
 				<span class="content">Connecting...</span>
-			</div>
+			</div> -->
 		{/if}
 	</div>
 
