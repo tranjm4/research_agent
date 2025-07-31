@@ -10,7 +10,7 @@ Evaluation metrics include:
 """
 
 from agent.tools.search import SearchModel
-from agent.eval.search.precision_eval_model import PrecisionEvalModel
+from eval.retriever.precision_eval_model import PrecisionEvalModel
 from backend.agent.tools.retriever import Retriever
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
