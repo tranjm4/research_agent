@@ -1,50 +1,83 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { marked } from 'marked';
-	import DOMPurify from 'dompurify';
 
-	const API_BASE_URL: string = 'http://localhost:8000';
+	const API_BASE_URL: string = 'http://localhost:8080';
 
 	interface Message {
 		id: number;
 		content: string;
-		type: 'user' | 'bot' | 'error';
+		sender: 'user' | 'assistant' | 'error';
 		timestamp: Date;
 		isStreaming?: boolean;
 	}
 
 	interface APIRequest {
-		user_input: string;
+		content: string;
+		conversationId: string;
 	}
 
 	interface APIResponse {
 		type: 'token' | 'end';
 		content: string;
 	}
-	let messageCounter: number = 0; // counter to track the number of messages and for identification
+
+	let props = $props();
+
+	let conversationId: string = $derived(props.conversationId || '');
+	let propMessages: Message[] = $derived(props.messages || []); // receive the list of messages from the parent component
+
+	let messageCounter: number = $state(0); // counter to track the number of messages and for identification
 
 	// reactive variables
-	let currentMessage: string = ''; // to hold the current message input
-	let isLoading: boolean = false;
-	let messages: Message[] = [];
-	let streamingContent: string = ''; // to accumulate streaming content
-	let streamingMessageId: number | null = null; // track which message is currently streaming
-	let isStreaming: boolean = false; // to track if a message is currently streaming
+	let currentMessage: string = $state('');
+	let isLoading: boolean = $state(false);
+	let messages: Message[] = $state([]);
+	let streamingContent: string = $state(''); // to accumulate streaming content
+	let streamingMessageId: number | null = $state(null);
+	let isStreaming: boolean = $state(false); // to track if a message is currently streaming
 
-	let chatContainer: HTMLDivElement | null = null;
-	let messageInput: HTMLInputElement | null = null; // to bind the input element
+	let chatContainer: HTMLDivElement | null = $state(null);
+	let messageInput: HTMLInputElement | null = $state(null); // to bind the input element
 
-	$: canSend = currentMessage.trim() !== '' && !isLoading;
-	$: buttonText = isLoading ? (isStreaming ? 'Streaming...' : 'Sending...') : 'Send';
-	$: inputPlaceholder = isLoading ? 'Please wait...' : 'Type your message here...';
+	let canSend: boolean = $derived(currentMessage.trim() !== '' && !isLoading);
+	let buttonText: string = $derived(
+		isLoading ? (isStreaming ? 'Streaming...' : 'Sending...') : 'Send'
+	);
+	let inputPlaceholder: string = $derived(
+		isLoading ? 'Please wait...' : 'Type your message here...'
+	);
 
-	function addMessage(content: string, type: Message['type'] = 'user'): Message {
+	onMount(() => {
+		scrollToBottom();
+	});
+
+	$effect(() => {
+		if (conversationId) {
+			console.log('Conversation ID changed:', conversationId);
+
+			// Clear the messages
+			messages = [];
+			isStreaming = false;
+			streamingContent = '';
+			streamingMessageId = null;
+
+			// Load the messages for the conversation
+			// This should be provided by the parent component
+			messages = propMessages.map((msg) => ({
+				...msg,
+				isStreaming: false // Ensure all messages are not streaming initially
+			}));
+		}
+	});
+
+	function addMessage(content: string, sender: Message['sender'] = 'user'): Message {
 		const message: Message = {
 			id: messageCounter++,
 			content,
-			type,
+			sender,
 			timestamp: new Date(),
-			isStreaming: type === 'bot' && content === '' // If type is "bot" and content is empty, it"s a streaming message
+			isStreaming: sender === 'assistant' && content === '' // If sender is "assistant" and content is empty, it"s a streaming message
 		};
 
 		messages = [...messages, message];
@@ -97,20 +130,24 @@
 		await tick(); // Ensure the DOM updates before making the API call
 		scrollToBottom();
 
-		const botMessage: Message = addMessage('', 'bot'); // Add a bot message with empty content
+		const botMessage: Message = addMessage('', 'assistant'); // Add a bot message with empty content
 		streamingMessageId = botMessage.id; // Store the ID of the streaming message
 
 		try {
+			console.log('Sending message:', userMessage, 'to conversation ID:', conversationId);
 			const requestBody: APIRequest = {
-				user_input: userMessage
+				content: userMessage,
+				conversationId: conversationId
 			};
 
-			const response: Response = await fetch(`${API_BASE_URL}/chat`, {
+			const response: Response = await fetch(`${API_BASE_URL}/chat/send`, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
-				body: JSON.stringify(requestBody)
+				body: JSON.stringify(requestBody),
+				credentials: 'include',
+				mode: 'cors'
 			});
 
 			if (!response.ok) {
@@ -172,6 +209,20 @@
 		}
 	}
 
+	// async function sendMessage(event: Event): Promise<void> {
+	// 	event.preventDefault();
+	// 	if (!canSend) return; // If cannot send, do nothing
+
+	// 	if (isStreaming) {
+	// 		// If currently streaming, stop the streaming and send the accumulated content
+	// 		if (streamingMessageId !== null) {
+	// 			await completeStreaming(streamingMessageId);
+	// 		}
+	// 	} else {
+	// 		await sendMessageStream();
+	// 	}
+	// }
+
 	function focusInput(): void {
 		messageInput?.focus();
 	}
@@ -186,14 +237,16 @@
 <div class="chat-container">
 	<div class="messages" bind:this={chatContainer}>
 		{#each messages as message}
-			<div class="message {message.type}" class:streaming={message.isStreaming}>
+			<div class="message {message.sender}" class:streaming={message.isStreaming}>
 				<span class="content">
 					{message.content}
 					{#if message.isStreaming}
 						<span class="cursor">▊</span>
 					{/if}
 				</span>
-				<span class="timestamp">{message.timestamp.toLocaleTimeString()}</span>
+				<span class="timestamp">
+					{new Date(message.timestamp).toLocaleTimeString()}
+				</span>
 			</div>
 		{/each}
 
@@ -204,7 +257,7 @@
 		{/if}
 	</div>
 
-	<form on:submit|preventDefault={sendMessageStream} class="input-form">
+	<form onsubmit={sendMessageStream} class="input-form">
 		<label for="search">Chat:</label>
 		<input
 			id="search"
@@ -212,7 +265,7 @@
 			bind:this={messageInput}
 			bind:value={currentMessage}
 			placeholder={inputPlaceholder}
-			on:keydown={(e) => {
+			onkeydown={(e) => {
 				if (e.key === 'Enter' && !e.shiftKey) {
 					e.preventDefault();
 					sendMessageStream();
@@ -236,7 +289,7 @@
 				Streaming... ({streamingContent.length} characters)
 
 				{#if streamingContent}
-					<button on:click={() => focusInput()}> Continue typing </button>
+					<button onclick={() => focusInput()}> Continue typing </button>
 				{/if}
 			</small>
 		</div>
@@ -323,7 +376,7 @@
 		max-width: 70%;
 	}
 
-	.message.bot {
+	.message.assistant {
 		background-color: #f8f9fa;
 		border: 1px solid #dee2e6;
 		max-width: 70%;

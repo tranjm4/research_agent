@@ -1,25 +1,20 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-
-	let postUrl: string = 'http://localhost:8080/auth/register';
+	import { postRegister } from '../auth';
 
 	import { goto } from '$app/navigation';
+	import { auth } from '../../../stores/auth.svelte';
 
-	let username: string = '';
-	let email: string = '';
-	let password: string = '';
-	let confirmPassword: string = '';
+	let username: string = $state('');
+	let email: string = $state('');
+	let password: string = $state('');
+	let confirmPassword: string = $state('');
 
-	$: isPasswordsMatch = password === confirmPassword;
-	$: isFormValid =
-		username.trim() !== '' && email.trim() !== '' && password.trim() !== '' && isPasswordsMatch;
-	$: passwordStrength = checkPasswordStrength();
-
-	interface UserData {
-		username: string;
-		email: string;
-		password: string;
-	}
+	let isPasswordsMatch: boolean = $derived(password === confirmPassword);
+	let isFormValid: boolean = $derived(
+		username.trim() !== '' && email.trim() !== '' && password.trim() !== '' && isPasswordsMatch
+	);
+	let passwordStrength: string = $derived(checkPasswordStrength());
 
 	function checkPasswordStrength(): string {
 		if (password.length === 0) {
@@ -33,28 +28,34 @@
 		}
 	}
 
-	// handleSubmit
+	interface RegisterData {
+		username: string;
+		email: string;
+		password: string;
+	}
+	const postUrl = 'http://localhost:8080/auth/register';
+
+	// Make a POST request to the registration endpoint
+	// and handle the response.
 	function handleSubmit(event: Event) {
 		event.preventDefault();
 		// Handle form submission logic here
 		if (isFormValid) {
-			const registerData: UserData = {
-				username: username,
-				email: email,
-				password: password
+			const postData: RegisterData = {
+				username,
+				email,
+				password
 			};
-
-			// send the data to the server
 			let response: Promise<Response> = fetch(postUrl, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
-				credentials: 'include', // Include cookies in the request
-				mode: 'cors', // Ensure CORS is enabled
-				body: JSON.stringify(registerData)
+				body: JSON.stringify(postData),
+				credentials: 'include',
+				mode: 'cors'
 			});
-
+			// Handle the response
 			response.then((res) => {
 				if (!res.ok) {
 					console.error('Error signing up:', res.statusText);
@@ -62,9 +63,13 @@
 					return;
 				} else {
 					console.log('Sign up successful');
-					goto('/chat');
+					// Update the auth store to reflect the new user
+					auth.setUser({
+						name: username
+					});
+					goto('/chat'); // Redirect to chat page after successful sign up
 				}
-			}); // then send the user to the chat page
+			});
 			response.catch((error) => {
 				console.error('Error during fetch:', error);
 			});
@@ -80,7 +85,7 @@
 
 <div class="signup-container">
 	<h1>Sign Up</h1>
-	<form on:submit={handleSubmit}>
+	<form onsubmit={handleSubmit}>
 		<label>
 			Username:
 			<input type="text" bind:value={username} required />

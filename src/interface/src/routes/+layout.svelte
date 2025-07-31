@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Header from './Header.svelte';
+	import Sidebar from './Sidebar.svelte';
 	import '../app.css';
 
 	let { children } = $props();
@@ -8,6 +9,7 @@
 <div class="app">
 	<Header />
 	<main>
+		<Sidebar />
 		{@render children()}
 	</main>
 
@@ -26,7 +28,7 @@
 	main {
 		flex: 1;
 		display: flex;
-		flex-direction: column;
+		flex-direction: row;
 		padding: 1rem;
 		width: 100%;
 		max-width: 64rem;
