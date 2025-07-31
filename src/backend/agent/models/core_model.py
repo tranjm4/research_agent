@@ -54,7 +54,7 @@ class CoreModel(ModelWrapper):
         
         super().__init__(self.model_params, self.metadata, self.logging)
         
-        self.system_prompt = config.get("system_prompt", self.default_system_prompt)
+        self.system_prompt = config.get("system_prompt", CoreModel.default_system_prompt)
         self.system_message = SystemMessage(content=self.system_prompt)
         
         self.model = init_chat_model(**self.model_params)
