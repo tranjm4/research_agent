@@ -61,53 +61,17 @@ class CoreModel(ModelWrapper):
         self.bound_model = None
         
         
-    def build_chat_prompt(self, messages: list[ChatMessage]):
-        """
-        Builds the chat prompt template for the core model.
-        
-        Returns:
-            ChatPromptTemplate: The constructed chat prompt template.
-        """
-        return ChatPromptTemplate.from_messages(
-            [
-                self.system_message,
-                HumanMessagePromptTemplate.from_template(self.default_user_prompt),
-                AIMessagePromptTemplate.from_template("{output}"),
-            ]
-        )
-
-    # def chatbot(self, state: State):
+    # def build_chat_prompt(self, messages: list[ChatMessage]):
     #     """
-    #     Chatbot function that processes the input state and returns the response.
+    #     Builds the chat prompt template for the core model.
         
-    #     Args:
-    #         state (State): The current state of the chatbot.
-            
     #     Returns:
-    #         dict: A dictionary containing the response from the core model.
+    #         ChatPromptTemplate: The constructed chat prompt template.
     #     """
-    #     execution_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    #     start_time = time.time()
-    #     result = [self.invoke(state["messages"])]
-    #     execution_time = time.time() - start_time
-        
-        
-    #     metadata = {}
-    #     metadata["execution_time"] = execution_time
-    #     metadata["execution_date"] = execution_date
-    #     for key in self.metadata:
-    #         if key not in state:
-    #             metadata[key] = self.metadata[key]
-        
-    #     return {
-    #         "messages": result,
-    #         "metadata": {
-    #             "execution_date": execution_date,
-    #             "execution_time": execution_time,
-    #             "output": result.__repr__(),
-    #             "model_name": self.metadata.get("model_name"),
-    #             "type": self.metadata.get("type", "core_model"),
-    #             "args": state["messages"].__repr__(),
-    #             "version_name": self.metadata.get("version_name")
-    #         }
-    #     }
+    #     return ChatPromptTemplate.from_messages(
+    #         [
+    #             self.system_message,
+    #             HumanMessagePromptTemplate.from_template(self.default_user_prompt),
+    #             AIMessagePromptTemplate.from_template("{output}"),
+    #         ]
+    #     )

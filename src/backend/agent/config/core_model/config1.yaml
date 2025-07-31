@@ -11,7 +11,7 @@ metadata:
   type: "core"
   version_name: "core/openai:gpt-4.1-nano/v1"
 
-system_prompt_file: "agent/prompts/core1.txt"
+system_prompt_file: "prompts/core1.txt"
 
 logs:
   out_file: "logs/core_model/output.txt"

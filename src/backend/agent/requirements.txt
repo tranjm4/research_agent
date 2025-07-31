@@ -1,4 +1,5 @@
 langchain
+faiss-cpu
 openai
 langchain-openai
 langchain-community

@@ -4,7 +4,7 @@ File: src/app.py
 This script serves as the entry point for the research agent application.
 
 """
-from graph import Graph
+from graphs.core_graph import Graph
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -82,6 +82,7 @@ app.add_middleware(
 
 class PromptRequest(BaseModel):
     user_input: str
+    conversation_id: str
 
 @app.post("/chat")
 async def chat(prompt_request: PromptRequest):
@@ -95,11 +96,12 @@ async def chat(prompt_request: PromptRequest):
         dict: A dictionary containing the response as a stream from the core model.
     """
     user_input = prompt_request.user_input  
+    conversation_id = prompt_request.conversation_id
     # print(f"User input: {user_input}")  # Debugging output
     
     async def stream_response():
         for token, metadata in GRAPH["graph"].stream({"messages": [{"role": "user", "content": user_input}]},
-                                        config={"configurable": {"thread_id": "1"}},
+                                        config={"configurable": {"thread_id": conversation_id}},
                                         stream_mode="messages"):
             try:
                 """

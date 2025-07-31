@@ -20,7 +20,7 @@ from langchain_core.tools import tool
 
 
 from utils import ModelWrapper, State
-from core_model import CoreModel
+from models.core_model import CoreModel
 from tools.retriever import Retriever
 from tools.search import SearchTool
 
@@ -112,7 +112,7 @@ class Graph(StateGraph):
             logging_config = self.config["core_config"]["logs"]
             out_file = logging_config["out_file"]
             
-            base_path = Path(__file__).parent
+            base_path = Path(__file__).parent.parent
             with open(base_path / out_file, "a") as f:
                 f.write(json.dumps(metadata) + "\n")
                 
@@ -222,6 +222,7 @@ def load_file(file_path: str) -> str:
     Returns:
         str: The content of the file.
     """
-    base_path = Path(__file__).parent
-    with open(base_path / "prompts" / file_path, "r") as f:
+    base_path = Path(__file__).parent.parent
+    print(base_path)
+    with open(base_path / "models" / "prompts" / file_path, "r") as f:
         return "\n".join([line.strip() for line in f.readlines() if line.strip()])  # Remove empty lines and strip whitespace

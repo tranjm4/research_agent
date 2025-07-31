@@ -1,0 +1,7 @@
+params:
+  model: "openai:gpt-4.1-nano"
+  temperature: 0.2
+  top_p: 0.9
+  max_retries: 1
+
+system_prompt: "core"

@@ -1,3 +1,3 @@
-core_config: "core/config1.yaml"
+core_config: "core_model/config1.yaml"
 retriever_config: "retriever/config1.yaml"
 search_config: "search/config1.yaml"
