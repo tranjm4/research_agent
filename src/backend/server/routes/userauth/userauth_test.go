@@ -7,8 +7,9 @@ import (
 
 	"database/sql"
 	"net/http"
-	"net/url"
 
+	"bytes"
+	"encoding/json"
 	"server/utils"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -39,26 +40,32 @@ func TestPostLoginFailsOnEmptyInput(t *testing.T) {
 	serverUrl := utils.GetServerUrl("../../.env")
 	assert.NotEmpty(serverUrl, "Server URL should not be empty")
 
+	client := &http.Client{}
+
 	// Make mock HTTP request to postLogin
-	form := setCredentials("", "", "")
-	resp, err := http.PostForm(serverUrl+"/auth/login", form)
+	request, err := prepareRequest("/auth/login", "", "", "")
+	assert.NoError(err, "Should prepare request without error")
+	assert.NotNil(request, "Request should not be nil")
+	resp, err := client.Do(request)
 	assert.NoError(err, "Should not return an error when making the request")
 	defer resp.Body.Close()
-	assert.Equal(resp.StatusCode, http.StatusBadRequest, "Expected HTTP status code 400 for empty input")
+	assert.Equal(http.StatusBadRequest, resp.StatusCode, "Expected HTTP status code 400 for empty input")
 
-	form = setCredentials("testuser", "", "")
-	resp, err = http.PostForm(serverUrl+"/auth/login", form)
+	request, err = prepareRequest("/auth/login", "testuser", "", "")
+	assert.NoError(err, "Should prepare request without error")
+	assert.NotNil(request, "Request should not be nil")
+	resp, err = client.Do(request)
 	assert.NoError(err, "Should not return an error when making the request")
 	defer resp.Body.Close()
-	assert.Equal(resp.StatusCode, http.StatusBadRequest, "Expected HTTP status code 400 for empty password")
+	assert.Equal(http.StatusBadRequest, resp.StatusCode, "Expected HTTP status code 400 for empty password")
 
-	form = setCredentials("", "", "testpassword")
-	resp, err = http.PostForm(serverUrl+"/auth/login", form)
+	request, err = prepareRequest("/auth/login", "", "", "testpassword")
+	assert.NoError(err, "Should prepare request without error")
+	assert.NotNil(request, "Request should not be nil")
+	resp, err = client.Do(request)
 	assert.NoError(err, "Should not return an error when making the request")
 	defer resp.Body.Close()
-	assert.Equal(resp.StatusCode, http.StatusBadRequest, "Expected HTTP status code 400 for empty input")
-
-	t.Log("[PASSED] PostLogin fails on empty input test passed")
+	assert.Equal(http.StatusBadRequest, resp.StatusCode, "Expected HTTP status code 400 for empty username")
 }
 
 func TestRegisterNewUser(t *testing.T) {
@@ -71,13 +78,15 @@ func TestRegisterNewUser(t *testing.T) {
 	username := "testuser_1"
 	email := "testuser_1@example.com"
 	password := "testpassword_1"
-	form := setCredentials(username, email, password)
 
-	resp, err := http.PostForm(serverUrl+"/auth/register", form)
+	resp, err := registerUser(username, email, password)
 	assert.NoError(err, "Should not return an error when making the request")
+	assert.NotNil(resp, "Response should not be nil")
+	assert.NotEmpty(resp.Body, "Response body should not be empty")
+	assert.NotEqual(resp.StatusCode, http.StatusInternalServerError, "Expected no internal server error")
 	defer resp.Body.Close()
 
-	assert.Equal(resp.StatusCode, http.StatusCreated, "Expected HTTP status code 201 for successful registration")
+	assert.Equal(http.StatusCreated, resp.StatusCode, "Expected HTTP status code 201 for successful registration")
 
 	// Verify the user was created in the database
 	dbUrl := utils.GetDBUrl("../../.env")
@@ -101,7 +110,7 @@ func TestRegisterNewUser(t *testing.T) {
 	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM users WHERE username = $1`, username).Scan(&userExists)
 	assert.NoError(err, "Should query the database without error")
 	assert.False(userExists, "User should not exist in the database after deletion")
-	t.Log("[PASSED] User deletion successful")
+
 }
 
 func TestDuplicateRegisterFails(t *testing.T) {
@@ -109,24 +118,23 @@ func TestDuplicateRegisterFails(t *testing.T) {
 	serverUrl := utils.GetServerUrl("../../.env")
 	assert.NotEmpty(serverUrl, "Server URL should not be empty")
 
-	// Register a user
 	username := "testuser_2"
 	email := "testuser_2@example.com"
 	password := "testpassword_2"
-	form := setCredentials(username, email, password)
 
-	resp, err := http.PostForm(serverUrl+"/auth/register", form)
+	// Register a user
+	resp, err := registerUser(username, email, password)
 	assert.NoError(err, "Should not return an error when making the request")
 	defer resp.Body.Close()
 
-	assert.Equal(resp.StatusCode, http.StatusCreated, "Expected HTTP status code 201 for successful registration")
+	assert.Equal(http.StatusCreated, resp.StatusCode, "Expected HTTP status code 201 for successful registration")
 
 	// Attempt to register the same username again
-	resp, err = http.PostForm(serverUrl+"/auth/register", form)
+	resp, err = registerUser(username, email, password)
 	assert.NoError(err, "Should not return an error when making the request")
 	defer resp.Body.Close()
 
-	assert.Equal(resp.StatusCode, http.StatusConflict, "Expected HTTP status code 409 for duplicate registration")
+	assert.Equal(http.StatusConflict, resp.StatusCode, "Expected HTTP status code 409 for duplicate registration")
 	t.Log("Duplicate registration test passed")
 
 	// Clean up: delete the test user
@@ -138,7 +146,7 @@ func TestDuplicateRegisterFails(t *testing.T) {
 	deleteQuery := `DELETE FROM users WHERE username = $1`
 	_, err = db.Exec(deleteQuery, username)
 	assert.NoError(err, "Should delete the test user without error")
-	t.Log("[PASSED] Test user deleted successfully")
+
 }
 
 func TestLoginWithValidCredentials(t *testing.T) {
@@ -150,22 +158,21 @@ func TestLoginWithValidCredentials(t *testing.T) {
 	username := "testuser_3"
 	email := "testuser_3@example.com"
 	password := "testpassword_3"
-	form := setCredentials(username, email, password)
 
-	resp, err := http.PostForm(serverUrl+"/auth/register", form)
+	resp, err := registerUser(username, email, password)
+	assert.NoError(err, "Should prepare request without error")
 	assert.NoError(err, "Should not return an error when making the request")
 	defer resp.Body.Close()
 
-	assert.Equal(resp.StatusCode, http.StatusCreated, "Expected HTTP status code 201 for successful registration")
+	assert.Equal(http.StatusCreated, resp.StatusCode, "Expected HTTP status code 201 for successful registration")
 
 	// Now attempt to login with the same credentials
-	loginForm := setCredentials(username, email, password)
-
-	resp, err = http.PostForm(serverUrl+"/auth/login", loginForm)
+	resp, err = loginUser(username, password)
+	assert.NoError(err, "Should prepare request without error")
 	assert.NoError(err, "Should not return an error when making the request")
 	defer resp.Body.Close()
 
-	assert.Equal(resp.StatusCode, http.StatusOK, "Expected HTTP status code 200 for successful login")
+	assert.Equal(http.StatusOK, resp.StatusCode, "Expected HTTP status code 200 for successful login")
 	t.Log("Login with valid credentials test passed")
 
 	// Clean up: delete the test user
@@ -177,13 +184,70 @@ func TestLoginWithValidCredentials(t *testing.T) {
 	deleteQuery := `DELETE FROM users WHERE username = $1`
 	_, err = db.Exec(deleteQuery, username)
 	assert.NoError(err, "Should delete the test user without error")
-	t.Log("[PASSED] Test user deleted successfully")
 }
 
-func setCredentials(username string, email string, password string) url.Values {
-	form := url.Values{}
-	form.Set("username", username)
-	form.Set("email", email)
-	form.Set("password", password)
-	return form
+// func TestLogoutRemovesUserSession(t *testing.T) {
+// 	assert := assert.New(t)
+// 	serverUrl := utils.GetServerUrl("../../.env")
+// 	assert.NotEmpty(serverUrl, "Server URL should not be empty")
+
+// 	// Register a user first
+// 	username := "testuser_4"
+// 	email := "testuser_4@example.com"
+// 	password := "testpassword_4"
+
+// 	resp, err := registerUser(username, email, password)
+// 	assert.NoError(err, "Should prepare request without error")
+// 	assert.Equal(http.StatusCreated, resp.StatusCode, "Expected HTTP status code 201 for successful registration")
+// 	defer resp.Body.Close()
+
+// 	// Now attempt to login with the same credentials
+// 	resp, err = loginUser(username, password)
+// 	assert.NoError(err, "Should prepare request without error")
+// 	assert.Equal(http.StatusOK, resp.StatusCode, "Expected HTTP status code 200 for successful login")
+// 	defer resp.Body.Close()
+
+// 	// Now attempt to logout
+// }
+
+type RequestData struct {
+	Username string `json:"Username"`
+	Email    string `json:"Email"`
+	Password string `json:"Password"`
+}
+
+func prepareRequest(path string, username string, email string, password string) (*http.Request, error) {
+	data := map[string]string{
+		"Username": username,
+		"Email":    email,
+		"Password": password,
+	}
+	jsonData, _ := json.Marshal(data)
+
+	route := "http://localhost:8080" + path
+	req, err := http.NewRequest("POST", route, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	return req, nil
+}
+
+func registerUser(username string, email string, password string) (*http.Response, error) {
+	client := &http.Client{}
+	request, err := prepareRequest("/auth/register", username, email, password)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(request)
+}
+
+func loginUser(username string, password string) (*http.Response, error) {
+	client := &http.Client{}
+	request, err := prepareRequest("/auth/login", username, "", password)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(request)
 }

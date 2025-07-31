@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"server/routes/chat"
 	"server/routes/userauth"
 	"server/utils"
 
@@ -53,7 +54,7 @@ func main() {
 
 	// Register routes
 	userauth.RegisterRoutes(r, db)
-	// chat.RegisterRoutes(r, db)
+	chat.RegisterRoutes(r, db)
 	// ai.RegisterRoutes(r, db)
 
 	fmt.Println("Connected to PostgreSQL database")

@@ -20,6 +20,7 @@ Handles authentication funcationalities:
 package userauth
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -27,17 +28,21 @@ import (
 	"log"
 	"time"
 
+	"server/routes/userauth/util"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 func RegisterRoutes(r chi.Router, db *sql.DB) {
 	// Define user authentication-related routes here
+	// r.Use(AuthMiddleware)
+
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/register", postRegister(db))
 		r.Post("/login", postLogin(db))
 		r.Post("/logout", postLogout(db))
+		r.Get("/status", GetUserAuthStatus(db))
 	})
 
 	// Additional routes can be added here as needed
@@ -65,6 +70,8 @@ func postLogin(db *sql.DB) http.HandlerFunc {
 		// Collect request data
 		var request LoginRequest
 		err := json.NewDecoder(r.Body).Decode(&request)
+
+		log.Println("Received login request:", request)
 		if err != nil {
 			log.Println("Failed to decode request body (Invalid JSON body):", err)
 			http.Error(w, "Invalid JSON request body", http.StatusBadRequest)
@@ -98,20 +105,38 @@ func postLogin(db *sql.DB) http.HandlerFunc {
 
 		// If we reach this point, the user is authenticated
 		// Generate a session token and return it to the client
-		sessionToken, err := generateSessionToken(username, db)
+		secretKey, err := util.LoadSecretKey(".env")
+		if err != nil {
+			log.Printf("Error loading secret key: %v", err)
+			http.Error(w, "Failed to load secret key", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Removed existing session token for user %s", username)
+
+		// Generate the session token
+		signedSessionToken, err := util.GenerateSessionToken(username, db, secretKey)
 		if err != nil {
 			log.Printf("Failed to generate session token for user %s: %v", username, err)
 			http.Error(w, "Failed to generate session token", http.StatusInternalServerError)
 			return
 		}
 
-		// Set the session token in a cookie
+		// Replace the existing session token in the database
+		err = util.ReplaceSessionToken(db, username, signedSessionToken)
+		if err != nil {
+			log.Printf("Failed to replace session token for user %s: %v", username, err)
+			http.Error(w, "Failed to replace session token", http.StatusInternalServerError)
+			return
+		}
+
+		// Set the session token in a
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session_token",
-			Value:    sessionToken,
+			Value:    signedSessionToken,
 			Path:     "/",                            // Set the cookie path to root so it's accessible across the site
 			HttpOnly: true,                           // Prevent JavaScript access to the cookie
-			Secure:   true,                           // Use secure cookies in production
+			Secure:   false,                          // Use secure cookies in production
 			Expires:  time.Now().Add(24 * time.Hour), // Set cookie expiration to 24 hours
 			SameSite: http.SameSiteLaxMode,           // Use Lax SameSite policy for CSRF protection
 		})
@@ -119,7 +144,7 @@ func postLogin(db *sql.DB) http.HandlerFunc {
 		// Return a success response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "Login successful"}`))
+		w.Write([]byte(`{"message": "Login successful", "ok": true}`))
 	}
 }
 
@@ -153,7 +178,7 @@ func postLogout(db *sql.DB) http.HandlerFunc {
 		// Return a success JSON response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "Logged out successfully"}`))
+		w.Write([]byte(`{"message": "Logged out successfully", "ok": true}`))
 
 		// Redirect the user to the home page
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -222,7 +247,14 @@ func postRegister(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Generate a session token for the new user
-		sessionToken, err := generateSessionToken(username, db)
+		secretKey, err := util.LoadSecretKey("../../.env")
+		if err != nil {
+			log.Printf("Error loading secret key: %v", err)
+			http.Error(w, "Failed to load secret key", http.StatusInternalServerError)
+			return
+		}
+		// Generate the session token
+		signedSessionToken, err := util.GenerateSessionToken(username, db, secretKey)
 		if err != nil {
 			log.Printf("Error generating session token: %v", err)
 			http.Error(w, "Failed to generate session token", http.StatusInternalServerError)
@@ -231,10 +263,10 @@ func postRegister(db *sql.DB) http.HandlerFunc {
 		// Set the session token in a cookie
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session_token",
-			Value:    sessionToken,
+			Value:    signedSessionToken,
 			Path:     "/",                            // Set the cookie path to root so it's accessible across the site
 			HttpOnly: true,                           // Prevent JavaScript access to the cookie
-			Secure:   true,                           // Use secure cookies in production
+			Secure:   false,                          // Use secure cookies in production
 			Expires:  time.Now().Add(24 * time.Hour), // Set cookie expiration to 24 hours
 			SameSite: http.SameSiteLaxMode,           // Use Lax SameSite policy for CSRF protection
 		})
@@ -244,40 +276,55 @@ func postRegister(db *sql.DB) http.HandlerFunc {
 		// Return a success response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"message": "User registered successfully"}`))
+		w.Write([]byte(`{"message": "User registered successfully", "ok":}`))
 	}
 }
 
-// generateSessionToken generates a session token for the user
-// This function should create a secure token, store it in the database,
-// and return it to the client.
-func generateSessionToken(username string, db *sql.DB) (string, error) {
-	// Create a new token
-	token := uuid.New().String()
+type ctxKey string
 
-	// Insert the session token into the database
-	err := insertSessionToDB(db, username, token)
-	if err != nil {
-		return "", err
-	}
+const userIDKey ctxKey = "Subject"
 
-	// Return the token
-	return token, nil
+func AuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenString := util.ExtractTokenFromRequest(r)
+
+		claims, err := util.VerifyJWT(tokenString)
+		if err != nil {
+			log.Printf("Invalid token: %v", err)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		userID := claims.Subject
+		if userID == "" {
+			log.Println("User ID not found in token claims")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), userIDKey, userID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
-func insertSessionToDB(db *sql.DB, username string, token string) error {
-	// get the user ID from the users table
-	var userID int
-	err := db.QueryRow("SELECT id FROM users WHERE username = $1", username).Scan(&userID)
-	if err != nil {
-		return err
+func GetUserAuthStatus(db *sql.DB) http.HandlerFunc {
+	// Check if the user is authenticated using the session token
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionExists, err := util.VerifyUserSession(db, r)
+		if err != nil {
+			log.Printf("Error verifying user session: %v", err)
+			http.Error(w, "Failed to verify user session", http.StatusInternalServerError)
+			return
+		}
+		if !sessionExists {
+			log.Println("Unauthorized access attempt")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// If the session is valid, return a success response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "User is authenticated", "ok": true}`))
 	}
-	// Insert the session token into the sessions table with an expiration date
-	expiration := time.Now().Add(24 * time.Hour) // Set expiration to 24 hours from now
-	_, err = db.Exec(
-		`INSERT INTO session_tokens (user_id, token, expires_at) 
-		VALUES ($1, $2, $3)`,
-		userID, token, expiration,
-	)
-	return err
 }
