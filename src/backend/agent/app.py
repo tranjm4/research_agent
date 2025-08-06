@@ -5,6 +5,16 @@ This script serves as the entry point for the research agent application.
 
 """
 from graphs.core_graph import Graph
+from graphs.planner_verifier_graph import PlannerVerifierGraph
+
+from models.core_model import CoreModel
+from models.planner_model import PlannerModel
+from models.verifier_model import VerifierModel
+from tools.retriever import Retriever
+from tools.search import SearchTool
+
+from utils.typing import GraphConfig, PlannerVerifierGraphConfig
+
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +24,6 @@ from typing import Optional, Dict, Any
 
 from contextlib import asynccontextmanager
 
-from argparse import ArgumentParser
 import yaml
 import json
 
@@ -34,6 +43,27 @@ def parse_yaml_config(config_path):
     This function is only run once at the start of the application 
     to load all necessary configurations for the graph's components, 
     such as the core LLM, retriever (and its vector store), and search tool.
+    
+    Example:
+    If the config file contains:
+    ```yaml
+    core_config: core_config.yaml
+    retriever_config: retriever_config.yaml
+    search_config: search_config.yaml
+    planner_verifier_config: planner_verifier_config.yaml
+    ```
+    
+    Then the function will read each of these files and return a dictionary
+    with the configurations for each component.
+    
+    Example Output:
+    ```python
+    {
+        "core_config": {...},
+        "retriever_config": {...},
+        "search_config": {...},
+        "planner_verifier_config": {...}
+    }
 
     Args:
         config_path (str): Path to the configuration file.
@@ -41,7 +71,7 @@ def parse_yaml_config(config_path):
     Returns:
         dict: Parsed configuration dictionary.
     """
-    base_path = Path(__file__).parent /"config"
+    base_path = Path(__file__).parent / "config"
     config_path = base_path / config_path
     with open(config_path, "r") as f:
         model_config_paths = yaml.safe_load(f)
@@ -55,7 +85,65 @@ def parse_yaml_config(config_path):
             
     return config
 
-CONFIG = parse_yaml_config(os.getenv("GRAPH_CONFIG", "config.yaml"))
+def init_components(config_path: str) -> Dict[str, Any]:
+    """
+    Initializes the components of the application based on the provided configuration.
+    
+    Args:
+        config_path (str): The path to the configuration file.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing initialized components.
+    """
+    components = {} # Initialize an empty dictionary to hold components
+    
+    model_configs = parse_yaml_config(config_path) # This should return a dict of configurations
+    from pprint import pprint
+    pprint(model_configs)
+    components["core_model"] = CoreModel(model_configs["core_model"])
+    components["retriever"] = Retriever(model_configs["retriever"])
+    components["search"] = SearchTool(model_configs["search"])
+    components["planner_model"] = PlannerModel(model_configs["planner_model"])
+    components["verifier_model"] = VerifierModel(model_configs["verifier_model"])
+    components["max_iterations"] = model_configs["planner_verifier"].get("max_iterations", 3)
+    
+    return components
+
+def init_graph(config_path: str) -> Graph:
+    """
+    Initializes the graph with the provided configuration.
+    
+    Args:
+        config_path (str): The path to the configuration file.
+
+    Returns:
+        Graph: An instance of the Graph class initialized with the configuration.
+    """
+    components = init_components(config_path)
+    
+    # Initialize the PlannerVerifierGraph with the components
+    # Do this first to be able to initialize the main graph
+    planner_verifier_config = PlannerVerifierGraphConfig(
+        planner_model=components["planner_model"],
+        verifier_model=components["verifier_model"],
+        max_iterations=components["max_iterations"]
+    )
+
+    planner_verifier_graph = PlannerVerifierGraph(config=planner_verifier_config)
+    
+    # Initialize the main graph
+    main_graph_config = GraphConfig(
+        core_model=components["core_model"],
+        retriever_tool=components["retriever"],
+        search_tool=components["search"],
+        planner_verifier_graph=planner_verifier_graph
+    )
+    main_graph = Graph(config=main_graph_config)
+
+    return main_graph
+
+# CONFIG = parse_yaml_config(os.getenv("GRAPH_CONFIG", "config.yaml"))
+CONFIG_PATH = os.getenv("GRAPH_CONFIG", "config.yaml")
 GRAPH = {}
 
 @asynccontextmanager
@@ -65,7 +153,7 @@ async def lifespan(app: FastAPI):
     
     This function initializes the core model when the application starts and cleans it up when the application stops.
     """
-    GRAPH["graph"] = Graph(CONFIG)
+    GRAPH["graph"] = init_graph(CONFIG_PATH)
     yield
     
     GRAPH.clear()
@@ -75,7 +163,7 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allows all origins, adjust as needed
-    allow_credentials=True,
+    allow_credentials=True, # Allows cookies to be included in requests
     allow_methods=["*"],  # Allows all methods, adjust as needed
     allow_headers=["*"],  # Allows all headers, adjust as needed
 )
