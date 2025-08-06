@@ -1,0 +1,18 @@
+params:
+  model: "openai:gpt-4.1-nano"
+  temperature: 0.2
+  top_p: 0.9
+  max_retries: 1
+
+system_prompt: "verifier1.txt"
+
+metadata:
+  model_name: "openai:gpt-4.1-nano"
+  type: "verifier"
+  version_name: "verifier/openai:gpt-4.1-nano/v1"
+
+system_prompt_file: "prompts/verifier1.txt"
+
+logs:
+  out_file: "logs/verifier_model/output.txt"
+  err_file: "logs/verifier_model/error.txt"
