@@ -4,12 +4,16 @@ from langchain_core.messages import ChatMessage, ToolMessage, HumanMessage, AIMe
 from langchain.chat_models import init_chat_model
 from langchain.chat_models.base import BaseChatModel
 
-from tools.rag.prompting import keyword_decomposition as decomposition
+from rag.prompting import keyword_decomposition as decomposition
 from tools.search import SearchTool
 from tools.retriever import Retriever
 
 from typing import Dict, Any
-from utils import ModelWrapper, State, log_stats
+
+from utils.typing import ModelConfig
+from utils.models import ModelWrapper
+from utils.graph import State
+from utils.logging import log_stats
 
 import time
 
@@ -41,7 +45,7 @@ class CoreModel(ModelWrapper):
     Answer succinctly and directly, using the provided context and information.
     """
 
-    def __init__(self, **config: Dict[str, Any]):
+    def __init__(self, config: ModelConfig):
         """
         Initializes the CoreModel with a prompt template and model name.
         Args:
