@@ -15,3 +15,4 @@ sentence-transformers
 ddgs
 pydantic
 langgraph
+langchain_postgres
