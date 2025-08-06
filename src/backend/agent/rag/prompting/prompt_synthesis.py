@@ -18,6 +18,8 @@ import regex as re
 from argparse import ArgumentParser
 from tqdm import tqdm
 
+import os
+
 
 def create_synthesis_prompt():
     synthesis_prompt = """INSTRUCTIONS:
@@ -85,12 +87,14 @@ def save_synthesis_prompt(prompt):
     Args:
         prompt (str): The synthesized prompt to save.
     """
-    with open("synthesis_prompts.txt", "a") as file:
+    file_path = os.path.join(os.path.dirname(__file__), "synthesis_prompts.txt")
+    with open(file_path, "a") as file:
         file.writelines(f"{prompt}\n")
 
 def load_synthesis_prompts():
     try:
-        with open("synthesis_prompts.txt", "r") as file:
+        file_path = os.path.join(os.path.dirname(__file__), "synthesis_prompts.txt")
+        with open(file_path, "r") as file:
             return [line.strip() for line in file.readlines()]
     except FileNotFoundError:
         return create_synthesis_prompt()
