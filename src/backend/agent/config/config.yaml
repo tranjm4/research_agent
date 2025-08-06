@@ -1,0 +1,6 @@
+core_model: "core_model/config1.yaml"
+retriever: "retriever/config1.yaml"
+search: "search/config1.yaml"
+planner_model: "planner_model/config1.yaml"
+verifier_model: "verifier_model/config1.yaml"
+planner_verifier: "planner_verifier/config1.yaml"
