@@ -11,7 +11,8 @@ from ddgs import DDGS
 from dotenv import load_dotenv
 load_dotenv()
 
-from utils import log_stats
+from utils.logging import log_stats
+from utils.typing import ModelConfig
 
 class SearchTool:
     """
@@ -20,7 +21,7 @@ class SearchTool:
     It uses the DuckDuckGoSearchRun tool to perform internet searches
     """
     
-    def __init__(self, **config):
+    def __init__(self, config: ModelConfig):
         """
         Initializes the SearchTool with the DuckDuckGoSearchRun tool.
         """

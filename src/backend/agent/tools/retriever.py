@@ -1,17 +1,18 @@
-from tools.rag.vectorstore.vector_db import load_db
+from rag.vector_db import load_db
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sentence_transformers import CrossEncoder
 
 from langchain_core.tools import tool
 
-from utils import ModelConfig, log_stats
+from utils.typing import ModelConfig
+from utils.logging import log_stats
 
 class Retriever:
     """
     A class to handle retrieval of documents from a vector database.
     """
-    def __init__(self, **config):
+    def __init__(self, config: ModelConfig):
         """
         Initializes the Retriever with a decomposition model and loads the vector database.
         Args:
@@ -107,6 +108,34 @@ class Retriever:
             return self.query(query)
 
         return retriever_tool
+    
+    def invoke(self, prompt: dict | str) -> str:
+        if type(prompt) is dict:
+            if "input" in prompt:
+                prompt = prompt["input"]
+            else:
+                raise ValueError("Input dictionary must contain 'input' key with the query string.")
+        if type(prompt) is not str:
+            raise ValueError(f"Input to Retriever must be a string. Received {type(prompt)}")
+        
+        query_results = []
+        with ThreadPoolExecutor(max_workers=len(self.shards)) as executor:
+            futures = [executor.submit(shard.invoke, prompt) for shard in self.shards]
+            for future in as_completed(futures):
+                try:
+                    results = future.result()
+                    if results:
+                        for r in results:
+                            query_results.append(r)
+                except Exception as e:
+                    print(f"Error querying shard: {e}")
+                    
+        if self.reranker is None:
+            return query_results
+        else:
+            # Rerank the results using the reranker model
+            reranked_results = self.reranker.rerank(query_results, prompt)
+            return reranked_results
 
 class Reranker:
     """
