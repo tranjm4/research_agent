@@ -1,0 +1,7 @@
+kafka-python
+pymongo
+PyMuPDF
+requests
+tqdm
+python-dotenv
+typing_extensions
