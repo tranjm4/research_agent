@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 
 from tqdm import tqdm
 
+import json
 from datetime import datetime, timezone, timedelta
 from time import sleep
 
@@ -19,7 +20,7 @@ from typing_extensions import TypedDict
 
 from concurrent.futures import ThreadPoolExecutor
 
-from message_queue import KafkaProducerWrapper
+from message_queue.message_queue import KafkaProducerWrapper
 
 import logging
 
@@ -35,6 +36,10 @@ NS = {
     "arxiv": "http://arxiv.org/OAI/arXiv/",
     "xsi": "http://www.w3.org/2001/XMLSchema-instance"
 }
+
+TIMESTAMP_FILE = "/app/data/last_harvest.json"
+
+TOPIC_NAME = os.getenv("TOPIC_NAME_PAPERS", "arxiv_papers")
         
 class Document(TypedDict):
     url: str
@@ -51,7 +56,7 @@ class Document(TypedDict):
         
 class Harvester:
     def __init__(self):
-        self.producer = KafkaProducerWrapper()
+        self.producer = KafkaProducerWrapper(TOPIC_NAME)
         self.last_harvest_timestamp = None
     
 
@@ -93,8 +98,8 @@ class Harvester:
         for record in tqdm(records, desc=f"Processing records {from_date} => {until_date}", unit="record"):
             document = self.extract_metadata(record)
             
-            # Send the document to Kafka message queue
-            self.producer.send_message(document, key=document.get("paper_id"))
+            # Send the document to Kafka message queue (no key for better distribution)
+            self.producer.send_message(document)
         
         resumption_token = root.find(".//oai:resumptionToken", namespaces=NS)
         if resumption_token is not None:
@@ -177,30 +182,42 @@ class Harvester:
         return params
     
     def _load_last_timestamp(self) -> Optional[str]:
-        """Loads the last timestamp from the environment variable
+        """Loads the last timestamp from the persisted file
         
         If found, returns the last harvest timestamp as a string.
-        Otherwise, logs the error and returns None
+        Otherwise, returns None if file doesn't exist or key isn't defined
         
         Returns:
             str | None: The last harvest timestamp or None if not found.
         """
-        last_timestamp = os.getenv("LAST_HARVEST_TIMESTAMP", "")
-        if last_timestamp:
-            logger.info(f"Using last harvest timestamp from environment: {last_timestamp}")
-            return last_timestamp
-        else:
-            logger.info("No last harvest timestamp found in environment. Harvesting from default 4 years ago")
+        try:
+            with open(TIMESTAMP_FILE, 'r') as f:
+                data = json.load(f)
+                last_timestamp = data.get('last_harvest_timestamp')
+                if last_timestamp:
+                    logger.info(f"Using last harvest timestamp from file: {last_timestamp}")
+                    return last_timestamp
+                else:
+                    logger.info("Key 'last_harvest_timestamp' not found in file")
+                    return None
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.info(f"Could not load timestamp file: {e}. Starting fresh harvest")
             return None
 
     def _update_last_timestamp(self) -> None:
         """
-        Updates the last harvest timestamp in the environment variable        
+        Updates the last harvest timestamp in the persisted file        
         """
         current_datetime_str = self._get_current_datetime()
-        os.environ["LAST_HARVEST_TIMESTAMP"] = current_datetime_str
-        logger.info(f"Updated last harvest timestamp in environment: {current_datetime_str}")
-
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(TIMESTAMP_FILE), exist_ok=True)
+        
+        # Save to file
+        with open(TIMESTAMP_FILE, 'w') as f:
+            json.dump({'last_harvest_timestamp': current_datetime_str}, f)
+        
+        logger.info(f"Updated last harvest timestamp in file: {current_datetime_str}")
         return
 
     def _get_current_datetime(self):
@@ -245,6 +262,9 @@ class Harvester:
             start = self._load_last_timestamp()
             if start == None:
                 start = end - timedelta(days=365 * 4) # by default, set start point to 4 years ago
+            else:
+                # Convert string timestamp to datetime object
+                start = datetime.strptime(start, "%Y-%m-%d")
                 
             with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = []
