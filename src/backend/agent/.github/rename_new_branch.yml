@@ -1,3 +1,0 @@
-# Automatically adds a "feature/" prefix stub upon creating a branch
-
-on: create
