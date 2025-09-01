@@ -16,4 +16,4 @@ ddgs
 pydantic
 langgraph
 langchain_postgres
-"mcp[cli]"
+mcp[cli]
