@@ -120,7 +120,7 @@ func GetConversationTitleFromRequest(r *http.Request) (string, error) {
 }
 
 type UserInput struct {
-	Message        string `json:"user_input"`
+	Message        string `json:"message"`
 	ConversationID string `json:"conversation_id"`
 }
 
@@ -168,10 +168,10 @@ func SendMessageToLLM(r *http.Request, message string, userID int, conversationI
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
-	log.Println("Response status from LLM server:", resp.Status)
 	if err != nil {
 		return nil, err
 	}
+	log.Println("Response status from LLM server:", resp.Status)
 	return resp, nil
 }
 

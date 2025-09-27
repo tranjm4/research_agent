@@ -127,13 +127,14 @@ func postSendMessage(db *sql.DB) http.HandlerFunc {
 			scanner := bufio.NewScanner(response.Body)
 			for scanner.Scan() {
 				line := scanner.Text()
+				log.Printf("Received line from agent: %s", line)
 				if line == "" {
 					continue // Skip empty lines
 				}
 				// Decode the JSON response from the LLM server
 				var llmResponse util.Message
 				if err := json.Unmarshal([]byte(line), &llmResponse); err != nil {
-					log.Printf("Failed to decode LLM response: %v", err)
+					log.Printf("Failed to decode LLM response: %v, raw line: %s", err, line)
 					errorMsg := util.Message{
 						ID:        userID,
 						Content:   "Error decoding response from LLM server",

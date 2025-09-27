@@ -28,7 +28,7 @@ func GetDBUrl(path string) string {
 	password := os.Getenv("POSTGRES_PASSWORD")
 	dbname := os.Getenv("POSTGRES_DB")
 	port := os.Getenv("DB_PORT")
-	return fmt.Sprintf("postgres://%s:%s@localhost:%s/%s", user, password, port, dbname)
+	return fmt.Sprintf("postgres://%s:%s@ra-psql:%s/%s", user, password, port, dbname)
 }
 
 type SqidsManager struct {
