@@ -1,0 +1,17 @@
+# docker-compose for mongodb client
+
+services:
+  mongo:
+    image: mongo:latest
+    container_name: arxiv_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data:/data/db
+      - ./config:/data/configdb
+    networks:
+      - arxiv_network
+
+volumes:
+  mongo_data:
+    driver: local
