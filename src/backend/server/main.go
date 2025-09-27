@@ -6,6 +6,7 @@ import (
 
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"server/routes/chat"
@@ -22,12 +23,13 @@ import (
 
 func main() {
 	r := chi.NewRouter()
+	serverURL := os.Getenv("CLIENT_URL")
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173"},
+		AllowedOrigins:   []string{serverURL},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
@@ -59,5 +61,9 @@ func main() {
 
 	fmt.Println("Connected to PostgreSQL database")
 	fmt.Println("Server is running on", utils.GetServerUrl(".env"))
-	http.ListenAndServe(":8080", r)
+	serverPort := os.Getenv("SERVER_PORT")
+	if serverPort == "" {
+		log.Printf("Failed to retrieve server port from environment variables; using default (8080)")
+	}
+	http.ListenAndServe(":"+serverPort, r)
 }

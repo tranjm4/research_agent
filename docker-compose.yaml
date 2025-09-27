@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:17
+    container_name: ra-psql
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./src/backend/psql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - pgdata:/var/lib/postgresql/data
+
+  server:
+    build: ./src/backend/server
+    container_name: ra-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+      - ./src/backend/server/.env
+    depends_on:
+      - db
+
+  agent:
+    build: ./src/backend/agent
+    container_name: ra-agent
+    env_file:
+      - .env
+      - ./src/backend/agent/.env
+    ports:
+      - "8000:8000"
+
+  client:
+    container_name: ra-client
+    build: ./src/interface/
+    ports:
+      - "5173:5173"
+    env_file:
+      - .env
+volumes:
+  pgdata:

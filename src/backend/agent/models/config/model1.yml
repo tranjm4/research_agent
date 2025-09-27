@@ -1,0 +1,9 @@
+# provider (ollama or openai)
+# ollama is used for prototyping; we would want to swap to openai for deployment and production
+model_provider: ollama
+
+model_params:
+  model: "mistral:3b"
+  num_predict: 4096
+  temperature: 0.3
+  num_ctx: 8192

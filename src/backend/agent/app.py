@@ -1,224 +1,268 @@
 """
-File: src/app.py
+File: src/backend/agent/host/app.py
 
-This script serves as the entry point for the research agent application.
+This file contains the host application for the system,
+where the core language model logic exists.
 
+It interfaces with the core server (Go)
+i.e., Frontend <-> Go <-> [host/app.py] <-> MCP servers
+
+It also interfaces with the MCP servers, which provide necessary context
+and tool availability
 """
-from graphs.core_graph import Graph
-from graphs.planner_verifier_graph import PlannerVerifierGraph
-
-from models.core_model import CoreModel
-from models.planner_model import PlannerModel
-from models.verifier_model import VerifierModel
-from tools.retriever import Retriever
-from tools.search import SearchTool
-
-from utils.typing import GraphConfig, PlannerVerifierGraphConfig
-
+import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from datetime import datetime
 
-from typing import Optional, Dict, Any
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from models.model import Model, ModelConfig
+from graphs.graph import MCPGraph
 
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+import asyncio
 
+from typing import Optional, AsyncGenerator
+import os
 import yaml
 import json
 
-import sys
-import os
-from pathlib import Path
+from utils import logger
 
-import uvicorn
-import asyncio
+from argparse import ArgumentParser
 
-def parse_yaml_config(config_path):
-    """Parses the YAML configuration file.
+from dotenv import load_dotenv
+load_dotenv()
+
+
+def load_model_config(config_path: str) -> dict:
+    """Load model configuration from YAML file"""
+    with open(config_path, 'r') as file:
+        return yaml.safe_load(file)
     
-    This function reads the configuration file specified by 'config_path', 
-    which contains paths to other YAML files.
-    
-    This function is only run once at the start of the application 
-    to load all necessary configurations for the graph's components, 
-    such as the core LLM, retriever (and its vector store), and search tool.
-    
-    Example:
-    If the config file contains:
-    ```yaml
-    core_config: core_config.yaml
-    retriever_config: retriever_config.yaml
-    search_config: search_config.yaml
-    planner_verifier_config: planner_verifier_config.yaml
-    ```
-    
-    Then the function will read each of these files and return a dictionary
-    with the configurations for each component.
-    
-    Example Output:
-    ```python
-    {
-        "core_config": {...},
-        "retriever_config": {...},
-        "search_config": {...},
-        "planner_verifier_config": {...}
-    }
 
-    Args:
-        config_path (str): Path to the configuration file.
+# Global MCP client instance
+mcp_client = None
+mcp_tools = []
+mcp_resources = []
 
-    Returns:
-        dict: Parsed configuration dictionary.
-    """
-    base_path = Path(__file__).parent / "config"
-    config_path = base_path / config_path
-    with open(config_path, "r") as f:
-        model_config_paths = yaml.safe_load(f)
-        
-    config = {}
-    for key, path in model_config_paths.items():
-        path = base_path / path
-        
-        with open(path, "r") as f:
-            config[key] = yaml.safe_load(f)
-            
-    return config
-
-def init_components(config_path: str) -> Dict[str, Any]:
-    """
-    Initializes the components of the application based on the provided configuration.
-    
-    Args:
-        config_path (str): The path to the configuration file.
-
-    Returns:
-        Dict[str, Any]: A dictionary containing initialized components.
-    """
-    components = {} # Initialize an empty dictionary to hold components
-    
-    model_configs = parse_yaml_config(config_path) # This should return a dict of configurations
-    from pprint import pprint
-    pprint(model_configs)
-    components["core_model"] = CoreModel(model_configs["core_model"])
-    components["retriever"] = Retriever(model_configs["retriever"])
-    components["search"] = SearchTool(model_configs["search"])
-    components["planner_model"] = PlannerModel(model_configs["planner_model"])
-    components["verifier_model"] = VerifierModel(model_configs["verifier_model"])
-    components["max_iterations"] = model_configs["planner_verifier"].get("max_iterations", 3)
-    
-    return components
-
-def init_graph(config_path: str) -> Graph:
-    """
-    Initializes the graph with the provided configuration.
-    
-    Args:
-        config_path (str): The path to the configuration file.
-
-    Returns:
-        Graph: An instance of the Graph class initialized with the configuration.
-    """
-    components = init_components(config_path)
-    
-    # Initialize the PlannerVerifierGraph with the components
-    # Do this first to be able to initialize the main graph
-    planner_verifier_config = PlannerVerifierGraphConfig(
-        planner_model=components["planner_model"],
-        verifier_model=components["verifier_model"],
-        max_iterations=components["max_iterations"]
-    )
-
-    planner_verifier_graph = PlannerVerifierGraph(config=planner_verifier_config)
-    
-    # Initialize the main graph
-    main_graph_config = GraphConfig(
-        core_model=components["core_model"],
-        retriever_tool=components["retriever"],
-        search_tool=components["search"],
-        planner_verifier_graph=planner_verifier_graph
-    )
-    main_graph = Graph(config=main_graph_config)
-
-    return main_graph
-
-# CONFIG = parse_yaml_config(os.getenv("GRAPH_CONFIG", "config.yaml"))
-CONFIG_PATH = os.getenv("GRAPH_CONFIG", "config.yaml")
-GRAPH = {}
-
+# Runs after if __name__ == '__main__' block
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan context manager for the FastAPI application.
-    
-    This function initializes the core model when the application starts and cleans it up when the application stops.
-    """
-    GRAPH["graph"] = init_graph(CONFIG_PATH)
-    yield
-    
-    GRAPH.clear()
+    """Lifespan context manager for startup/shutdown"""
+    # Startup - test MCP server availability
+    if mcp_client:
+        try:
+            tools = await mcp_client.get_available_tools()
+            logger.info(f"MCP server available with tools: {[tool['function']['name'] for tool in tools]}")
+            
+            # Cache tools
+            global mcp_tools
+            mcp_tools = tools
+        except Exception as e:
+            logger.info(f"MCP server check failed: {e}")
 
+    yield
+
+    # Shutdown - nothing to cleanup (stateless)
+
+
+class MCPClient:
+    def __init__(self, model_config: ModelConfig):
+        self.server_path = os.getenv("MCP_SERVER_PATH", "./servers/search_server.py")
+
+        if model_config is None:
+            model_config = ModelConfig(config=OpenAIConfig(
+                model_provider="openai",
+                max_tokens=4096,
+                temperature=0.7,
+                timeout=30,
+                max_retries=3
+            ))
+
+        self.model = Model(model_config)
+        self.graph = MCPGraph(self.model)
+
+    async def get_available_tools(self) -> list:
+        """Get available tools from MCP server (stateless)"""
+        command = "python"
+        server_params = StdioServerParameters(
+            command=command,
+            args=[self.server_path],
+            env=None
+        )
+        
+        # Return cached result if it already exists
+        global mcp_tools
+        if mcp_tools:
+            return mcp_tools
+        
+        # Otherwise, we make a request to the server for its tools
+        async with AsyncExitStack() as exit_stack:
+            # Create temporary connection to get tools
+            stdio_transport = await exit_stack.enter_async_context(stdio_client(server_params))
+            stdio, write = stdio_transport
+            session = await exit_stack.enter_async_context(ClientSession(stdio, write))
+
+            await session.initialize()
+
+            try:
+                response = await session.list_tools()
+                return [{
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.inputSchema
+                    }
+                } for tool in response.tools]
+            except Exception as e:
+                logger.info(f"Error getting tools: {e}")
+                return []
+
+    async def process_query(self, query: str, conversation_id: str) -> str:
+        """
+        Process query using stateless MCP connection (follows LangGraph patterns)
+        """
+        try:
+            command = "python"
+            server_params = StdioServerParameters(
+                command=command,
+                args=[self.server_path],
+                env=None
+            )
+
+            async with AsyncExitStack() as exit_stack:
+                # Create fresh MCP connection per request (stateless)
+                stdio_transport = await exit_stack.enter_async_context(stdio_client(server_params))
+                stdio, write = stdio_transport
+                session = await exit_stack.enter_async_context(ClientSession(stdio, write))
+
+                await session.initialize()
+
+                available_tools = mcp_tools
+
+                # Process query with fresh session
+                result = await self.graph.invoke(
+                    message=query,
+                    conversation_id=conversation_id,
+                    available_tools=available_tools,
+                    mcp_session=session
+                )
+
+                # Session automatically cleaned up when exiting context
+                return result
+
+        except Exception as e:
+            import traceback
+            full_error = traceback.format_exc()
+            logger.error(f"Error in process_query: {full_error}")
+            raise
+        
+        
 app = FastAPI(lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins, adjust as needed
-    allow_credentials=True, # Allows cookies to be included in requests
-    allow_methods=["*"],  # Allows all methods, adjust as needed
-    allow_headers=["*"],  # Allows all headers, adjust as needed
-)
 
-class PromptRequest(BaseModel):
-    user_input: str
+async def stream_response(message: str, conversation_id: str) -> AsyncGenerator:
+    """Generator function to stream response tokens
+    
+    Args:
+        message (str): The user input prompt
+        conversation_id (str): The conversation ID to distinguish as thread_id
+            for the graph
+    
+    Returns:
+        AsyncGenerator: The response stream as an AsyncGenerator
+    """
+    try:
+        logger.info(f"Streaming response for message: {message}")
+
+        # Process the query and get streaming response
+        response = await mcp_client.process_query(message, conversation_id)
+
+        # For now, simulate streaming by breaking response into chunks
+        words = response.split()
+        for word in enumerate(words):
+            chunk = {
+                "id": 0,
+                "content": word[1] + " ",
+                "timestamp": datetime.now().isoformat(),
+                "sender": "assistant"
+            }
+            yield f"{json.dumps(chunk)}\n"
+            await asyncio.sleep(0.05)  # Small delay to simulate streaming
+
+    except Exception as e:
+        import traceback
+        full_error = traceback.format_exc()
+        logger.error(f"Error in stream_response: {full_error}")
+
+        error_chunk = {
+            "id": 0,
+            "content": f"Error: {str(e)}",
+            "timestamp": datetime.now().isoformat(),
+            "sender": "error"
+        }
+        yield f"{json.dumps(error_chunk)}\n"
+
+class ChatPostBody(BaseModel):
+    message: str
     conversation_id: str
 
 @app.post("/chat")
-async def chat(prompt_request: PromptRequest):
+async def chat_endpoint(body: ChatPostBody):
     """
-    Endpoint to handle chat requests.
-    
-    Args:
-        prompt_request (PromptRequest): The request body containing user input.
-        
-    Returns:
-        dict: A dictionary containing the response as a stream from the core model.
+    Handle chat requests from the frontend with streaming response
     """
-    user_input = prompt_request.user_input  
-    conversation_id = prompt_request.conversation_id
-    # print(f"User input: {user_input}")  # Debugging output
-    
-    async def stream_response():
-        for token, metadata in GRAPH["graph"].stream({"messages": [{"role": "user", "content": user_input}]},
-                                        config={"configurable": {"thread_id": conversation_id}},
-                                        stream_mode="messages"):
-            try:
-                """
-                This prints the AI response as it is generated.
-                TODO: create a verbose mode that prints all messages for debugging
-                    when creating a more structured main loop.
-                """
-                if token.additional_kwargs == {} and token.response_metadata == {}:
-                    content = str(token.content)
-                    if token.content.startswith("Document") or token.content.startswith("[{"):
-                        continue
-                    
-                    chunk = {"type": "token", "content": content}
-                    json_line = json.dumps(chunk) + "\n"
-                    yield json_line
+    logger.info(f"Received chat POST request: {body}")
 
-                    await asyncio.sleep(0.05) # Simulate a delay for streaming effect
-            except Exception as e:
-                continue
-        # Finalize the stream with an end token
-        end_chunk = {"type": "end", "content": ""}
-        yield json.dumps(end_chunk) + "\n"
     return StreamingResponse(
-        stream_response(),
-        status_code=200,
+        stream_response(body.message, body.conversation_id),
+        media_type="text/plain",
         headers={
-            "Content-Type": "text/plain; charset=utf-8",
-        },
-        media_type="text/plain"
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream"
+        }
     )
-    
-    # TODO: Log the response and metadata to the database
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint
+    """
+    return {
+        "status": "healthy",
+        "mcp_connected": mcp_client.session is not None
+    }
+
+def create_app_with_config(config_path: str):
+    """Create the app with the loaded configuration"""
+    global mcp_client
+
+    # Load model configuration
+    config_data = load_model_config(config_path)
+
+    # Restructure the config to match the new Pydantic model structure
+    model_params = config_data.get('model_params', {})
+    model_params["model_provider"] = config_data.get('model_provider')
+    model_config = ModelConfig(params=model_params)
+    mcp_client = MCPClient(model_config)
+
+    return app
+
+if __name__ == '__main__':
+    parser = ArgumentParser(description="Run FastAPI application with custom arguments")
+    # TODO: move --host and --port to .env file
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
+    parser.add_argument("--config", required=True, help="Config file to read from host/models/config")
+
+    args = parser.parse_args()
+
+    # Create app with configuration
+    configured_app = create_app_with_config(args.config)
+
+    uvicorn.run(configured_app, host=args.host, port=args.port)

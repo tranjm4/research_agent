@@ -1,0 +1,10 @@
+# provider (ollama or openai)
+# ollama is used for prototyping; we would want to swap to openai for deployment and production
+model_provider: "openai"
+
+model_params:
+  model: "gpt-5-nano"
+  max_tokens: 4096
+  temperature: 0.3
+  max_retries: 2
+  timeout: 60
