@@ -10,6 +10,8 @@ from typing import Dict, Any, List, Optional
 from kafka import KafkaConsumer
 import signal
 import fitz # PyMuPDF
+import pdfplumber # Alternative parsing library: pdfplumber
+import io
 from pymongo import ReplaceOne
 import requests
 import json
@@ -28,14 +30,14 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOPIC_NAME_PAPERS = os.getenv('TOPIC_NAME_PAPERS', 'arxiv_papers')
-TOPIC_NAME_DOCS = os.getenv('TOPIC_NAME_DOCS', 'arxiv_docs')
+TOPIC_NAME_CONSUMER = os.getenv('TOPIC_NAME_PARSING', 'arxiv_papers')
+TOPIC_NAME_PRODUCER = os.getenv('TOPIC_NAME_KW', 'arxiv_docs')
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
 
 class ArxivParser:
     def __init__(self):
-        self.consumer = KafkaConsumerWrapper(TOPIC_NAME_PAPERS)
-        self.producer = KafkaProducerWrapper(TOPIC_NAME_DOCS)
+        self.consumer = KafkaConsumerWrapper(TOPIC_NAME_CONSUMER)
+        self.producer = KafkaProducerWrapper(TOPIC_NAME_PRODUCER)
         self.mongo_client = MongoDBWrapper()
         self.running = True
         
@@ -222,8 +224,20 @@ class ArxivParser:
             pdf_data = response.content
 
             # Parse the PDF
-            doc = fitz.open(stream=pdf_data, filetype="pdf")
-            text = ""
+            # doc = fitz.open(stream=pdf_data, filetype="pdf")
+            
+            with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
+                full_text = ""
+                for page in pdf.pages:
+                    page_text = page.extract_text(
+                        x_tolerance=3,
+                        y_tolerance=3,
+                        layout=False,
+                        x_density=7.25,
+                        y_density=13
+                    )
+                    if page_text:
+                        full_text += page_text + "\n"
             for page_num in range(doc.page_count):
                 try:
                     page = doc[page_num]
@@ -234,8 +248,6 @@ class ArxivParser:
             logger.error(f"Failed to download PDF for {id}: {e}")
             return None
         finally:
-            if doc:
-                doc.close()
             end_time = time.time()
             exec_time = end_time - start_time
             if exec_time < 0.5:
