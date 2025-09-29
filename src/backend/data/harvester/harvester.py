@@ -2,6 +2,8 @@
 HARVESTER
 
 Interacts with arXiv's Open Archives Initiative (OAI) to harvest archive metadata.
+
+It collects the articles (and metadata) and sends the data downstream via Kafka topic
 """
 
 import requests
@@ -15,12 +17,14 @@ from time import sleep
 
 from dotenv import load_dotenv
 import os
-from typing import Dict, Any, Optional
+from typing import Optional, List
 from typing_extensions import TypedDict
 
 from concurrent.futures import ThreadPoolExecutor
 
 from message_queue.message_queue import KafkaProducerWrapper
+from pymongo.mongo_client import MongoClient
+from pymongo.errors import BulkWriteError, PyMongoError
 
 import logging
 
@@ -39,7 +43,15 @@ NS = {
 
 TIMESTAMP_FILE = "/app/data/last_harvest.json"
 
-TOPIC_NAME = os.getenv("TOPIC_NAME_PAPERS", "arxiv_papers")
+TOPIC_NAME_PRODUCER = os.getenv("TOPIC_NAME_PARSING", "parsing")
+BATCH_SIZE = int(os.getenv("HARVESTER_BATCH_SIZE", 512))
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = os.getenv("DB_NAME")
+RAW_COLLECTION=os.getenv("RAW_COLLECTION")
+
+# Verify the .env variables were properly loaded
+if any([not x for x in [MONGO_URI, DB_NAME, RAW_COLLECTION]]):
+    raise EnvironmentError("Failed to find MONGO_URI, DB_NAME, RAW_COLLECTION in env variables")
         
 class Document(TypedDict):
     url: str
@@ -51,14 +63,20 @@ class Document(TypedDict):
     created_date: str
     updated_date: str
     abstract: str
-    topic: list[str]
+    topics: list[str]
     subtopics: list[str]
         
 class Harvester:
     def __init__(self):
-        self.producer = KafkaProducerWrapper(TOPIC_NAME)
+        self.producer = KafkaProducerWrapper(TOPIC_NAME_PRODUCER, 
+                                             batch_size=16384,
+                                             linger_ms=50)
         self.last_harvest_timestamp = None
-    
+        self.mongo_client = MongoClient(MONGO_URI)
+        try:
+            self.mongo_client.admin.command("ping")
+        except Exception as e:
+            raise PyMongoError(f"Failed to connect to MongoDB: {e}")
 
     def send_request(self, resumption_token = None, from_date = None, until_date = None) -> requests.Response:
         """
@@ -95,13 +113,25 @@ class Harvester:
         
         # process response
         records = root.findall(".//oai:record", namespaces=NS)
+        batch = []
         for record in tqdm(records, desc=f"Processing records {from_date} => {until_date}", unit="record"):
             document = self.extract_metadata(record)
             
+            # If batch size is met, insert it to the db
+            batch.append(document)
+            if len(batch) == BATCH_SIZE:
+                self._batch_insert_documents(batch)
+                batch = []
             # Send the document to Kafka message queue (no key for better distribution)
             self.producer.send_message(document)
         
         resumption_token = root.find(".//oai:resumptionToken", namespaces=NS)
+        
+        # insert any remaining documents        
+        if batch:
+            self._batch_insert_documents(batch)
+
+        # check for resumption token for pagination
         if resumption_token is not None:
             resumption_token = resumption_token.text
         
@@ -158,11 +188,24 @@ class Harvester:
             "created_date": created,
             "updated_date": updated,
             "abstract": abstract,
-            "topic": main_topics,
+            "topics": main_topics,
             "subtopics": sub_topics,
         }
             
         return document
+    
+    def _batch_insert_documents(self, batch: List[Document]):
+        """
+        Given a list of Documents, inserts them into the MongoDB collection
+        """
+        db = self.mongo_client[DB_NAME]
+        collection = db[RAW_COLLECTION]
+        
+        try:
+            result = collection.insert_many(batch, ordered=False)
+            logger.info(f"Inserted {len(result.inserted_ids)} documents")
+        except BulkWriteError as e:
+            logger.error(f"Batch insert error: {e.details}")
 
     def _build_params(self, resumption_token, from_date, until_date):
         params = {}
@@ -226,7 +269,6 @@ class Harvester:
         
         return current_utc_str
     
-
     def _generate_week_ranges(self, start_date, end_date):
         current = start_date
         while current < end_date:
@@ -261,7 +303,7 @@ class Harvester:
             end = datetime.now() # set end to today
             start = self._load_last_timestamp()
             if start == None:
-                start = end - timedelta(days=365 * 4) # by default, set start point to 4 years ago
+                start = end - timedelta(days=365) # by default, set start point to 1 years ago
             else:
                 # Convert string timestamp to datetime object
                 start = datetime.strptime(start, "%Y-%m-%d")
