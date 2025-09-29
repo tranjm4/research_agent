@@ -20,7 +20,7 @@ TOPIC_NAME = os.getenv('TOPIC_NAME', 'arxiv_papers')
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
 
 class KafkaProducerWrapper:
-    def __init__(self, topic_name: str):
+    def __init__(self, topic_name: str, **kwargs):
         self._message_counter = 0
         self._counter_lock = threading.Lock()
         self.producer = KafkaProducer(
@@ -31,7 +31,8 @@ class KafkaProducerWrapper:
             acks='all',
             partitioner=self._custom_partitioner,
             max_request_size=104857600,  # 100MB
-            buffer_memory=134217728      # 128MB
+            buffer_memory=134217728,     # 128MB
+            **kwargs
         )
         self.topic_name = topic_name
         
@@ -71,9 +72,9 @@ class KafkaProducerWrapper:
 
 # Consumer wrapper class for listening for messages to be processed
 class KafkaConsumerWrapper:
-    def __init__(self, topic: str, consumer_group: str = 'arxiv_processors',
+    def __init__(self, topic: str, consumer_group: str,
                  session_timeout_ms=30000, heartbeat_interval_ms=10000,
-                 max_poll_interval_ms=180000, max_poll_records=5):
+                 max_poll_interval_ms=180000, max_poll_records=5, **kwargs):
         self.topic = topic
         self.consumer = KafkaConsumer(
             topic,
@@ -86,7 +87,8 @@ class KafkaConsumerWrapper:
             session_timeout_ms=session_timeout_ms,
             heartbeat_interval_ms=heartbeat_interval_ms,
             max_poll_interval_ms=max_poll_interval_ms,
-            max_poll_records=max_poll_records
+            max_poll_records=max_poll_records,
+            **kwargs
         )
         
     def consume_messages(self):
