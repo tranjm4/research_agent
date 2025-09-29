@@ -4,10 +4,12 @@ File: src/backend/data/processing/extract_keywords.py
 This file is responsible for extracting keywords from the text documents.
 The extracted keywords will be stored as document metadata for querying.
 
-Reads from the Kafka topic (chunks) and writes to the MongoDB collection (arxiv_chunks)
+Reads from the Kafka topic (default: extracting) 
+and writes to the MongoDB collection (default kwe_docs)
+and produces to the Kafka topic (default: chunking)
 """
 
-from message_queue.message_queue import KafkaConsumerWrapper
+from message_queue.message_queue import KafkaConsumerWrapper, KafkaProducerWrapper
 from pymongo.mongo_client import MongoClient
 from pymongo.errors import ConnectionFailure
 from dotenv import load_dotenv
@@ -19,24 +21,36 @@ from typing import Dict, Any, List, Optional
 import signal
 import spacy
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+KAFKA_PRODUCER_TOPIC = os.getenv("TOPIC_NAME_CHUNKING", "chunking")
+KAFKA_CONSUMER_TOPIC = os.getenv("TOPIC_NAME_EXTRACTING", "extracting")
+
+DB_NAME = os.getenv("DB_NAME")
+KWE_COLLECTION_NAME = os.getenv("KWE_COLLECTION")
+RUNTIME_DATE = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%x")
+
+
 class KwExtractor:
     def __init__(self):
-        self.consumer = KafkaConsumerWrapper('chunks',
-                                             consumer_group='chunk_processors',
+        self.consumer = KafkaConsumerWrapper(KAFKA_CONSUMER_TOPIC,
+                                             consumer_group='extractor',
                                              max_poll_interval_ms=60000,
                                              max_poll_records=100)
+        self.producer = KafkaProducerWrapper(KAFKA_PRODUCER_TOPIC)
         self.running = True
         signal.signal(signal.SIGINT, self.sigint_sigterm_handler)
         signal.signal(signal.SIGTERM, self.sigint_sigterm_handler)
 
         self.nlp = spacy.load("en_core_web_sm") # Load spaCy model
-        self.db = self.connect_to_mongo()
+        self.client = self.connect_to_mongo()
         
         # Batch processing setup
-        self.chunk_batch = []
+        self.doc_batch = []
         self.processed_messages = []
         self.batch_size = 20
 
@@ -51,14 +65,14 @@ class KwExtractor:
                 num_messages = 0
                 for message in self.consumer.consume_messages():
                     try:
-                        processed_chunk = self.process_message(message)
-                        if processed_chunk:
+                        processed_doc = self.process_message(message)
+                        if processed_doc:
                             # Add to batch instead of immediate insert
-                            self.chunk_batch.append(processed_chunk)
+                            self.doc_batch.append(processed_doc)
                             self.processed_messages.append(message)
                             
                             # Process batch when it reaches batch_size
-                            if len(self.chunk_batch) >= self.batch_size:
+                            if len(self.doc_batch) >= self.batch_size:
                                 if self.flush_batch():
                                     logger.info(f"Successfully processed batch of {len(self.processed_messages)} chunks")
                                 else:
@@ -81,29 +95,29 @@ class KwExtractor:
             logger.error(f"Error in keyword extractor main loop: {e}")
         finally:
             # Process any remaining chunks in batch
-            if self.chunk_batch:
-                logger.info(f"Processing final batch of {len(self.chunk_batch)} chunks")
+            if self.doc_batch:
+                logger.info(f"Processing final batch of {len(self.doc_batch)} chunks")
                 self.flush_batch()
             self.cleanup()
 
     def process_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Process a chunk message and extract keywords"""
         try:
-            chunk_data = message['value']
+            doc_data = message['value']
             
-            # Extract chunk text for keyword processing
-            chunk_text = chunk_data.get('chunk_text', '')
-            if not chunk_text:
+            # Extract document text for keyword processing
+            doc_text = doc_data.get('text_content', '')
+            if not doc_text:
                 logger.warning("Empty chunk_text received, skipping")
-                return chunk_data  # Return empty chunk for batch consistency
+                return doc_data  # Return empty chunk for batch consistency
             
             # Extract keywords from chunk text
-            keywords = self.extract(chunk_text)
+            keywords = self.extract(doc_text)
             
             # Add keywords to the chunk document
-            chunk_data['keywords'] = keywords
+            doc_data['keywords'] = keywords
             
-            return chunk_data
+            return doc_data
                 
         except Exception as e:
             logger.error(f"Error processing chunk message: {e}")
@@ -111,15 +125,32 @@ class KwExtractor:
     
     def flush_batch(self) -> bool:
         """Insert the current batch of chunks and commit their offsets."""
-        if not self.chunk_batch:
+        if not self.doc_batch:
             return True
             
         try:
-            # Batch insert all chunks
-            result = self.db['arxiv_chunks'].insert_many(self.chunk_batch, ordered=False)
+            
+            # Create a copy of the docs
+            mongo_docs = []
+            for doc in self.doc_batch:
+                clean_doc = {k:v for k,v in doc.items() if k != "_id"}
+                mongo_docs.append(clean_doc)
+                    
+            # Batch insert all docs to MongoDB
+            result = self.client[DB_NAME][KWE_COLLECTION_NAME].insert_many(mongo_docs, ordered=False)
             
             if result.inserted_ids:
-                # Commit all message offsets
+                # Send all processed documents to next topic (e.g., chunking)
+                docs_sent = 0
+                for document in self.doc_batch:
+                    if self.producer.send_message(document, verbose=False):
+                        docs_sent += 1
+                    else:
+                        logger.warning(f"Failed to send document {document.get('paper_id', 'unknown')} to chunking topic")
+                logger.info(f"Successfully send {docs_sent} documents to chunking topic")
+                
+                # Commit all message offsets only after successful
+                # MongoDB insert AND Kafka send
                 for message in self.processed_messages:
                     commit_success = self.consumer.commit_offset(message)
                     if not commit_success:
@@ -129,7 +160,7 @@ class KwExtractor:
                 logger.info(f"Successfully inserted {len(result.inserted_ids)} chunks with keywords")
                 
                 # Clear the batches
-                self.chunk_batch.clear()
+                self.doc_batch.clear()
                 self.processed_messages.clear()
                 return True
             else:
@@ -153,11 +184,12 @@ class KwExtractor:
             
             # Add noun phrases
             for chunk in doc.noun_chunks:
-                if len(chunk.text.split()) <= 3:  # Limit to 3-word phrases
+                chunk_text = chunk.text.lower().strip()
+                if len(chunk_text.split()) <= 3 and len(chunk_text) < 16:
                     keywords.append(chunk.text.lower().strip())
             
             # Remove duplicates and empty strings
-            return list(set([kw for kw in keywords if kw and len(kw) > 2]))
+            return list(set([kw for kw in keywords if kw and len(kw) > 2]))[:50]
             
         except Exception as e:
             logging.error(f"Error extracting keywords from text: {e}")
@@ -170,7 +202,7 @@ class KwExtractor:
             self.client.admin.command('ping')
             
             logging.info("Connected to MongoDB")
-            return self.client['arxiv_db']
+            return self.client
         except ConnectionFailure as e:
             logging.error(f"Failed to connect to MongoDB: {e}")
             
