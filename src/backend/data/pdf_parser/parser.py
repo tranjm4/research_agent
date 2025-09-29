@@ -10,6 +10,8 @@ from typing import Dict, Any, List, Optional
 from kafka import KafkaConsumer
 import signal
 import fitz # PyMuPDF
+import pymupdf as pmpdf
+import pymupdf4llm as pmpdf_llm
 import pdfplumber # Alternative parsing library: pdfplumber
 import io
 from pymongo import ReplaceOne
@@ -30,13 +32,20 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOPIC_NAME_CONSUMER = os.getenv('TOPIC_NAME_PARSING', 'arxiv_papers')
-TOPIC_NAME_PRODUCER = os.getenv('TOPIC_NAME_KW', 'arxiv_docs')
+TOPIC_NAME_CONSUMER = os.getenv('TOPIC_NAME_PARSING', 'parsing')
+TOPIC_NAME_PRODUCER = os.getenv('TOPIC_NAME_EXTRACTING', 'extracting')
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+DB_NAME = os.getenv("DB_NAME")
+PARSED_COLLECTION = os.getenv("PARSED_COLLECTION")
 
 class ArxivParser:
     def __init__(self):
-        self.consumer = KafkaConsumerWrapper(TOPIC_NAME_CONSUMER)
+        self.consumer = KafkaConsumerWrapper(TOPIC_NAME_CONSUMER, 
+                                             consumer_group="parsing",
+                                             max_poll_records=5,
+                                             session_timeout_ms=60000,
+                                             heartbeat_interval_ms=20000,
+                                             )
         self.producer = KafkaProducerWrapper(TOPIC_NAME_PRODUCER)
         self.mongo_client = MongoDBWrapper()
         self.running = True
@@ -44,7 +53,7 @@ class ArxivParser:
         # Batch processing setup
         self.document_batch = []
         self.processed_messages = []
-        self.batch_size = 20
+        self.batch_size = 5
         
         # Handle graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -64,7 +73,7 @@ class ArxivParser:
         """
         try:
             paper_id = paper_data.get('paper_id')
-            topics = paper_data.get('topic', [])
+            topics = paper_data.get('topics', [])
             
             if not topics:
                 logger.warning(f"No topics found for paper {paper_id}, skipping")
@@ -103,22 +112,16 @@ class ArxivParser:
             
         try:
             # Insert all documents into all_docs collection
-            success = self.mongo_client.batch_insert(self.document_batch, collection_name="all_docs")
+            success = self.mongo_client.batch_insert(self.document_batch, collection_name=PARSED_COLLECTION)
 
             if success:
                 # Send all processed documents to 'docs' topic
                 docs_sent = 0
                 for document in self.document_batch:
-                    doc_message = {
-                        "collection": "all_docs",  # or use document.get('topic', ['unknown'])[0]
-                        "data": document
-                    }
-                    
-                    if self.producer.send_message(doc_message, verbose=False):
+                    if self.producer.send_message(document, verbose=False):
                         docs_sent += 1
                     else:
                         logger.warning(f"Failed to send document {document.get('paper_id', 'unknown')} to docs topic - likely too large, skipping")
-                        # Don't return False here - continue with other documents
                 
                 logger.info(f"Successfully sent {docs_sent} documents to docs topic")
                 
@@ -209,7 +212,7 @@ class ArxivParser:
         logger.info("Processor cleanup completed")
 
     
-    def parse_pdf(self, id):
+    def parse_pdf(self, id) -> str:
         url = f"https://arxiv.org/pdf/{id}"
         doc = None
         
@@ -224,9 +227,28 @@ class ArxivParser:
             pdf_data = response.content
 
             # Parse the PDF
-            # doc = fitz.open(stream=pdf_data, filetype="pdf")
             
-            with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
+            # Uncomment to use pdfplumber (slower)
+            # full_text = self._parse_pdfplumber(response.content)
+            
+            full_text = self._parse_pymupdf4llm(response.content)
+            
+            return full_text
+                
+        except Exception as e:
+            logger.error(f"Failed to download PDF for {id}: {e}")
+            return None
+        finally:
+            end_time = time.time()
+            exec_time = end_time - start_time
+            if exec_time < 0.5:
+                time.sleep(0.5 - exec_time)
+                
+    def _parse_pdfplumber(self, content: bytes) -> str:
+        """
+        Uses pdfplumber ot extract text from the HTTP response content
+        """
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
                 full_text = ""
                 for page in pdf.pages:
                     page_text = page.extract_text(
@@ -238,22 +260,22 @@ class ArxivParser:
                     )
                     if page_text:
                         full_text += page_text + "\n"
-            for page_num in range(doc.page_count):
-                try:
-                    page = doc[page_num]
-                    text += page.get_text()
-                except Exception as e:
-                    logger.error(f"Failed to extract text from page {page_num} of {id}: {e}")
-        except Exception as e:
-            logger.error(f"Failed to download PDF for {id}: {e}")
-            return None
-        finally:
-            end_time = time.time()
-            exec_time = end_time - start_time
-            if exec_time < 0.5:
-                time.sleep(0.5 - exec_time)
+                        
+                return full_text
+        
+    def _parse_pymupdf4llm(self, content: bytes) -> str:
+        """
+        Uses pymupdf4llm to extract text from the HTTP response content
+        
+        Args:
+            bytes: The pdf as a stream of bytes
             
-        return text
+        Returns:
+            str: The PDF as a string (in markdown, as described by the pymupdf4llm documentation)
+        """
+        with pmpdf.open(stream=io.BytesIO(content), filetype="pdf") as pdf:
+            md_text = pmpdf_llm.to_markdown(pdf)
+            return md_text
     
 class MongoDBWrapper:
     def __init__(self):
