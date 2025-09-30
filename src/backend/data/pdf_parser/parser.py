@@ -7,6 +7,7 @@ Handles PDF parsing, text extraction, and database insertion.
 
 import logging
 from typing import Dict, Any, List, Optional
+from typing_extensions import TypedDict
 from kafka import KafkaConsumer
 import signal
 import fitz # PyMuPDF
@@ -18,6 +19,8 @@ from pymongo import ReplaceOne
 import requests
 import json
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from pymongo.mongo_client import MongoClient
@@ -37,6 +40,28 @@ TOPIC_NAME_PRODUCER = os.getenv('TOPIC_NAME_EXTRACTING', 'extracting')
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
 DB_NAME = os.getenv("DB_NAME")
 PARSED_COLLECTION = os.getenv("PARSED_COLLECTION")
+
+RUNTIME_DATETIME = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M")
+
+class InputDocument(TypedDict):
+    url: str
+    title: str
+    authors: list[str]
+    paper_id: str
+    identifier: str
+    datestamp: str
+    created_date: str
+    updated_date: str
+    abstract: str
+    topics: list[str]
+    subtopics: list[str]
+    obtained_date: datetime
+    
+class OutputDocument(InputDocument, total=False):
+    parsed_date: datetime
+    text_content: str
+    parse_success: bool
+    
 
 class ArxivParser:
     def __init__(self):
@@ -63,7 +88,7 @@ class ArxivParser:
         logger.info("Received shutdown signal, stopping parser gracefully...")
         self.running = False
         
-    def process_paper(self, paper_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def process_paper(self, paper_data: InputDocument) -> OutputDocument:
         """
         Processes a single arXiv paper by extracting metadata and text content.
         Returns the processed document for batch insertion.
@@ -90,10 +115,13 @@ class ArxivParser:
                 text_content = self.parse_pdf(paper_id)
                 if text_content:
                     paper_data['text_content'] = text_content
+                    paper_data['parse_success'] = True
                 else:
                     logger.warning(f"Failed to parse PDF for {paper_id}")
                     paper_data['text_content'] = ""
+                    paper_data['parse_success'] = False
             
+            paper_data["parsed_date"] = RUNTIME_DATETIME
             return paper_data
             
         except Exception as e:

@@ -18,6 +18,7 @@ load_dotenv()
 import logging
 import signal
 from typing import Dict, Any, List, Optional
+from typing_extensions import TypedDict
 import signal
 import spacy
 
@@ -32,8 +33,29 @@ KAFKA_CONSUMER_TOPIC = os.getenv("TOPIC_NAME_EXTRACTING", "extracting")
 
 DB_NAME = os.getenv("DB_NAME")
 KWE_COLLECTION_NAME = os.getenv("KWE_COLLECTION")
-RUNTIME_DATE = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%x")
+RUNTIME_DATE = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M")
 
+
+class InputDocument(TypedDict):
+    url: str
+    title: str
+    authors: list[str]
+    paper_id: str
+    identifier: str
+    datestamp: str
+    created_date: str
+    updated_date: str
+    abstract: str
+    topics: list[str]
+    subtopics: list[str]
+    obtained_date: datetime
+    parsed_date: datetime
+    text_content: str
+    parse_success: bool
+    
+class OutputDocument(InputDocument):
+    keywords: list[str]
+    kwe_date: datetime
 
 class KwExtractor:
     def __init__(self):
@@ -59,6 +81,11 @@ class KwExtractor:
         self.running = False
         
     def run(self):
+        """
+        The main function that runs the extraction part of the pipeline.
+        The KwExtractor listens from the consumer topic, processes the keywords,
+            and produces the result to the producer topic
+        """
         logger.info("Starting keyword extraction")
         try:
             while self.running:
@@ -100,7 +127,7 @@ class KwExtractor:
                 self.flush_batch()
             self.cleanup()
 
-    def process_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def process_message(self, message: InputDocument) -> OutputDocument:
         """Process a chunk message and extract keywords"""
         try:
             doc_data = message['value']
@@ -116,6 +143,7 @@ class KwExtractor:
             
             # Add keywords to the chunk document
             doc_data['keywords'] = keywords
+            doc_data['kwe_date'] = RUNTIME_DATE
             
             return doc_data
                 
@@ -172,6 +200,17 @@ class KwExtractor:
             return False
 
     def extract(self, text: str) -> List[str]:
+        """
+        Extracts keywords from a given text excerpt.
+        Uses the configured NLP method to extract 50 keywords
+        TODO: Improve pruning/method to reduce noisy results
+        
+        Args:
+            text (str): The input text to extract keywords from
+            
+        Returns:
+            List[str]: The list of keywords that the extraction method produces
+        """
         try:
             doc = self.nlp(text)
             # Extract named entities and noun phrases as keywords

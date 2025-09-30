@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 import json
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from time import sleep
 
 from dotenv import load_dotenv
@@ -49,6 +50,8 @@ MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = os.getenv("DB_NAME")
 RAW_COLLECTION=os.getenv("RAW_COLLECTION")
 
+RUNTIME_DATETIME = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M")
+
 # Verify the .env variables were properly loaded
 if any([not x for x in [MONGO_URI, DB_NAME, RAW_COLLECTION]]):
     raise EnvironmentError("Failed to find MONGO_URI, DB_NAME, RAW_COLLECTION in env variables")
@@ -65,6 +68,7 @@ class Document(TypedDict):
     abstract: str
     topics: list[str]
     subtopics: list[str]
+    obtained_date: datetime
         
 class Harvester:
     def __init__(self):
@@ -137,7 +141,7 @@ class Harvester:
         
         return resumption_token
 
-    def extract_metadata(self, record):
+    def extract_metadata(self, record) -> Document:
         # Collect header information
         header = record.find("oai:header", NS)
         identifier = header.find("oai:identifier", NS).text
@@ -178,19 +182,20 @@ class Harvester:
             authors.append(full_name)
             
         # Create document for Kafka message
-        document = {
-            "url": f"https://arxiv.org/abs/{paper_id}",
-            "title": title,
-            "authors": authors,
-            "paper_id": paper_id,
-            "identifier": identifier,
-            "datestamp": datestamp,
-            "created_date": created,
-            "updated_date": updated,
-            "abstract": abstract,
-            "topics": main_topics,
-            "subtopics": sub_topics,
-        }
+        document = Document(
+            url= f"https://arxiv.org/abs/{paper_id}",
+            title=title,
+            authors=authors,
+            paper_id=paper_id,
+            identifier=identifier,
+            datestamp=datestamp,
+            created_date=created,
+            updated_date=updated,
+            abstract=abstract,
+            topics=main_topics,
+            subtopics=sub_topics,
+            obtained_date=RUNTIME_DATETIME # for data lineage purposes
+        )
             
         return document
     
