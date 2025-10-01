@@ -15,12 +15,14 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
-TOPIC_NAME = os.getenv('TOPIC_NAME_DOCS', 'docs')
 KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
 
 class DocLoader:
-    def __init__(self):
-        self.producer = KafkaProducerWrapper(TOPIC_NAME)
+    def __init__(self, topic_name: str = None):
+        if topic_name is None:
+            topic_name = os.getenv('TOPIC_NAME_DOCS', 'docs')
+        self.topic_name = topic_name
+        self.producer = KafkaProducerWrapper(topic_name)
         self.db = self.connect_to_mongo()
         if self.db is None:
             logger.error("Failed to connect to MongoDB")
@@ -51,16 +53,10 @@ class DocLoader:
         try:
             for document in collection.find():
                 try:
-                    # Convert ObjectId to string for JSON serialization
-                    if '_id' in document:
-                        document['_id'] = str(document['_id'])
+                    # Remove _id from document
+                    clean_document = {k:v for k,v in document.items() if k != "_id"}
                     
-                    data = {
-                        "collection": collection_name,
-                        "data": document
-                    }
-                    # Send without key for round-robin distribution (like harvester)
-                    self.producer.send_message(data)
+                    self.producer.send_message(clean_document)
                     i += 1
                     
                     if i % 500 == 0:
@@ -124,9 +120,18 @@ class DocLoader:
             logger.error(f"Error connecting to MongoDB: {e}")
             return None
         
-        db = client["arxiv_db"]
+        db = client[os.getenv("DB_NAME")]
         return db
 
 if __name__ == '__main__':
-    doc_loader = DocLoader()
-    doc_loader.load_documents_to_kafka()
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Load MongoDB documents to Kafka')
+    parser.add_argument('--collection', type=str, required=True, help='Collection to load')
+    parser.add_argument('--topic', type=str, required=True, help='Kafka topic name')
+    args = parser.parse_args()
+    
+    logger.info(f"Loading documents from {args.collection} to {args.topic} Kafka topic")
+
+    doc_loader = DocLoader(topic_name=args.topic)
+    doc_loader.load_collection_to_kafka(args.collection)

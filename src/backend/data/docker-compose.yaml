@@ -88,7 +88,7 @@ services:
       - database
       - messaging
     deploy:
-      replicas: 8
+      replicas: 4
 
   mongo:
     image: mongo:latest
@@ -115,6 +115,7 @@ services:
       dockerfile: ./processing/Dockerfile.loader
     container_name: arxiv_doc_loader
     env_file: ./.env
+    command: ["--collection", "${COLLECTION_NAME}", "--topic", "${TOPIC_NAME}"]
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - MONGO_URI=mongodb://admin:pass@arxiv_mongo:27017/arxiv_db?authSource=admin
@@ -163,8 +164,6 @@ services:
     networks:
       - messaging
       - database
-    deploy:
-      replicas: 3
 
 volumes:
   kafka-data:

@@ -8,4 +8,5 @@ RUN pip install -r requirements.txt
 COPY processing/db_loader.py .
 COPY message_queue/message_queue.py ./message_queue/
 
-CMD ["python", "db_loader.py"]
+ENTRYPOINT ["python", "db_loader.py"]
+CMD []
