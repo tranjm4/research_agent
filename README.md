@@ -38,7 +38,7 @@ The project consists of:
 - [application backend server](https://github.com/tranjm4/research_agent/tree/main/src/backend/server)
 - [application frontend client](https://github.com/tranjm4/research_agent/tree/main/src/interface)
 
-### 1 Data Pipeline `src/data`
+### 1. [Data Pipeline `src/backend/data`](https://github.com/tranjm4/research_agent/tree/main/src/backend/data)
 
 This is an **ETL pipeline** that harvests, transforms, versions, and stores data into a MongoDB instance for model experiments. Its primary components:
 
@@ -52,23 +52,23 @@ At each step, it checkpoints the stored data to a MongoDB instance (see [`src/da
 In between each step, these components read/write from/to a [**Kafka** message broker](https://github.com/tranjm4/research_agent/blob/main/src/backend/data/docker-compose.yaml) to allow for continuous data ingestion and processing as needed.
 
 
-#### 1.1 Harvester `src/backend/data/harvester/harvester.py`
+#### 1.1 [Harvester `src/backend/data/harvester/harvester.py`](https://github.com/tranjm4/research_agent/tree/main/src/backend/data/harvester)
 
 The harvester retrieves document metadata (upload date, document ID, abstract text, authors, primary topics, etc.) from **arXiv** using their [Open Archives Initiative (OAI)](https://info.arxiv.org/help/oa/index.html) API.
 
 The API does not provide the PDF, so the PDF parser (next step) retrieves it.
 
-#### 1.2 PDF parser `src/backend/data/pdf_parser/parser.py`
+#### 1.2 [PDF parser `src/backend/data/pdf_parser/parser.py`](https://github.com/tranjm4/research_agent/tree/main/src/backend/data/harvester)
 
-The parser uses PyMuPDF and PyMuPDF4LLM to parse documents into a markdown format, which is likely to produce more effective results for RAG purposes.
+The parser uses [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/) and [PyMuPDF4LLM](https://pymupdf.readthedocs.io/en/latest/pymupdf4llm/) to parse documents into a markdown format, which is likely to produce more effective results for RAG purposes.
 
 Given a document's ID parser makes a request to **arXiv** for the PDF, with which the parsing method of choice extracts the markdown text from it.
 
-#### 1.3 Keyword extractor `src/backend/data/processing/extrac_keywords.py`
+#### 1.3 [Keyword extractor `src/backend/data/processing/extrac_keywords.py`](https://github.com/tranjm4/research_agent/tree/main/src/backend/data/processing)
 
 The keyword extractor is done for the entire document (to be shared across chunks for keyword search in reranking). This is done before chunking as opposed to the other way around due to computational costs; extracting from a single larger document would be much quicker than extracting from 100+ chunks.
 
-#### 1.4 Text Chunker `src/backend/data/processing/chunking.py`
+#### 1.4 [Text Chunker `src/backend/data/processing/chunking.py`](https://github.com/tranjm4/research_agent/tree/main/src/backend/data/processing)
 
 The text chunker currently utilizes various methods (for experimentation):
 - **chunking by tokens**
@@ -80,16 +80,16 @@ The text chunker currently utilizes various methods (for experimentation):
 - **chunking by semantics**
     - we preserve the paragraphs when chunking by tokens -- paragraphs preserve similarly related ideas/semantics
 
-### 2. Agent Server `src/backend/agent`
+### 2. [Agent Server `src/backend/agent`](https://github.com/tranjm4/research_agent/tree/main/src/backend/agent)
 
 The agent server serves as an API endpoint to the **Application Backend Server**, and it is an MCP client to MCP servers that serve as tool and resource endpoints for agent tool/resource discovery.
 
 Some key functionalities:
 - Internal database search via the vectorstore of collected documents
-- External search via DuckDuckGo API
+- External search via [DuckDuckGo API](https://pypi.org/project/duckduckgo-search/)
 - Document management features (e.g., annotation) (**TODO**)
 
-### 3. Application Backend Server `src/backend/server`
+### 3. [Application Backend Server `src/backend/server`](https://github.com/tranjm4/research_agent/tree/main/src/backend/server)
 
 The backend server serves multiple functions:
 - Proxy to the application database and agent server
@@ -98,7 +98,7 @@ The backend server serves multiple functions:
 - Relay user prompts from frontend client to agent server and relay stream back to frontend client
 
 
-### 4. Application Frontend Client `src/interface`
+### 4. [Application Frontend Client `src/interface`](https://github.com/tranjm4/research_agent/tree/main/src/interface)
 
 This serves as the end user's interface, developed with React.
 
