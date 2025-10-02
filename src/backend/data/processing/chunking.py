@@ -7,11 +7,15 @@ This file is responsible for chunking the article content into smaller, manageab
 from message_queue.message_queue import KafkaProducerWrapper, KafkaConsumerWrapper
 from pymongo.mongo_client import MongoClient
 from pymongo.errors import PyMongoError
-from typing import Dict, Any, List, Tuple, Iterable
+from typing import Dict, Any, List, Tuple, Iterable, Literal
 from typing_extensions import TypedDict
 import logging
 import signal
 import tiktoken
+import nltk
+nltk.download("punkt_tab")
+
+from argparse import ArgumentParser
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -25,10 +29,9 @@ TOPIC_NAME_CONSUMER = os.getenv('TOPIC_NAME_CHUNKING', 'chunking')
 RUNTIME_DATE = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M")
 MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = os.getenv("DB_NAME")
-COLLECTION_NAME = os.getenv("CHUNKED_COLLECTION")
 
-if not DB_NAME or not COLLECTION_NAME:
-    raise Exception("Failed to get DB_NAME or COLLECTION_NAME from environment variables")
+if not DB_NAME or not MONGO_URI:
+    raise Exception("Failed to get DB_NAME or MONGO_URI from environment variables")
 
 class InputDocument(TypedDict):
     """
@@ -55,23 +58,139 @@ class InputDocument(TypedDict):
 class OutputDocument(InputDocument):
     chunked_date: datetime
     chunk_text: str
+    
+ChunkingStrategy = Literal["token", "semantic", "sentence"]
+
+class ChunkingStrategyInterface:
+    """Base class for chunking strategies"""
+    def chunk(self, text: str) -> List[str]:
+        raise NotImplementedError
+
+class TokenChunker(ChunkingStrategyInterface):
+    def __init__(self, max_tokens: int = 256, overlap: int = 64):
+        self.max_tokens = max_tokens
+        self.overlap = overlap
+        self.tokenizer = tiktoken.get_encoding("cl100k_base")
+
+    def chunk(self, text: str) -> List[str]:
+        try:
+            tokens = self.tokenizer.encode(text, disallowed_special=())
+            chunks = []
+
+            for i in range(0, len(tokens), self.max_tokens - self.overlap):
+                if len(tokens) - i < (self.max_tokens // 2) and chunks:
+                    chunk_tokens = tokens[i:]
+                    chunks[-1] = chunks[-1] + self.tokenizer.decode(chunk_tokens)
+                else:
+                    chunk_tokens = tokens[i:i + self.max_tokens]
+                    chunk_text = self.tokenizer.decode(chunk_tokens)
+                    chunks.append(chunk_text)
+
+            return chunks
+        except Exception as e:
+            logger.error(f"Error chunking text: {e}")
+            # Fallback to character-based chunking
+            chunk_size = self.max_tokens * 4
+            return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+class SemanticChunker(ChunkingStrategyInterface):
+    """Chunks text by paragraphs and sections, preserving semantic boundaries"""
+    def __init__(self, max_chars: int = 1024, overlap: int = 128):
+        self.max_chars = max_chars
+        self.overlap = overlap
+
+    def chunk(self, text: str) -> List[str]:
+        try:
+            # Split by paragraphs (double newlines)
+            paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+
+            chunks = []
+            current_chunk = ""
+
+            for para in paragraphs:
+                # If adding this paragraph exceeds max, save current chunk
+                if len(current_chunk) + len(para) > self.max_chars and current_chunk:
+                    chunks.append(current_chunk)
+                    # Start new chunk with overlap from previous
+                    overlap_text = current_chunk[-self.overlap:] if len(current_chunk) > self.overlap else current_chunk
+                    current_chunk = overlap_text + "\n\n" + para
+                else:
+                    current_chunk += ("\n\n" if current_chunk else "") + para
+
+            # Add final chunk
+            if current_chunk:
+                chunks.append(current_chunk)
+
+            return chunks if chunks else [text]
+        except Exception as e:
+            logger.error(f"Error in semantic chunking: {e}")
+            # Fallback to simple character chunking
+            return [text[i:i + self.max_chars] for i in range(0, len(text), self.max_chars)]
+
+class SentenceChunker(ChunkingStrategyInterface):
+    """Chunks text by sentences, grouping until token limit"""
+    def __init__(self, max_tokens: int = 256, overlap_sentences: int = 2):
+        self.max_tokens = max_tokens
+        self.overlap_sentences = overlap_sentences
+        self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        # Download required NLTK data
+        try:
+            nltk.data.find('tokenizers/punkt')
+        except LookupError:
+            nltk.download('punkt', quiet=True)
+
+    def chunk(self, text: str) -> List[str]:
+        try:
+            # Tokenize into sentences
+            sentences = nltk.sent_tokenize(text)
+
+            chunks = []
+            current_chunk = []
+            current_tokens = 0
+
+            for sentence in sentences:
+                sentence_tokens = len(self.tokenizer.encode(sentence))
+
+                # If adding this sentence exceeds max, save current chunk
+                if current_tokens + sentence_tokens > self.max_tokens and current_chunk:
+                    chunks.append(" ".join(current_chunk))
+                    # Start new chunk with overlap sentences
+                    current_chunk = current_chunk[-self.overlap_sentences:] if len(current_chunk) > self.overlap_sentences else []
+                    current_tokens = sum(len(self.tokenizer.encode(s)) for s in current_chunk)
+
+                current_chunk.append(sentence)
+                current_tokens += sentence_tokens
+
+            # Add final chunk
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
+
+            return chunks if chunks else [text]
+        except Exception as e:
+            logger.error(f"Error in sentence chunking: {e}")
+            # Fallback to character chunking
+            chunk_size = self.max_tokens * 4
+            return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 class DocChunker:
-    def __init__(self):
+    def __init__(self, consumer_group_name: str, collection_name: str, chunking_strategy: ChunkingStrategyInterface):
         # Reads from the docs topic
+        self.consumer_group_name = consumer_group_name
         self.consumer = KafkaConsumerWrapper(TOPIC_NAME_CONSUMER,
-                                             consumer_group='doc_processors',
+                                             consumer_group=consumer_group_name,
                                              max_poll_interval_ms=60000,
                                              max_poll_records=50)
         self.running = True # Indicates if the chunker is running
-        self.tokenizer = tiktoken.get_encoding("cl100k_base")  # GPT-3.5/GPT-4 tokenizer
-        
+        self.chunking_strategy = chunking_strategy
+
         self.client = MongoClient(MONGO_URI)
         try:
             self.client.admin.command("ping")
         except Exception:
             raise PyMongoError("Failed to connect to MongoDB instance")
-        
+
+        self.collection_name = collection_name
+
         signal.signal(signal.SIGINT, self.sigint_sigterm_handler)
         signal.signal(signal.SIGTERM, self.sigint_sigterm_handler)
                 
@@ -84,6 +203,8 @@ class DocChunker:
             while self.running:
                 message_count = 0
                 for message in self.consumer.consume_messages():
+                    if not self.running:
+                        break
                     try:
                         message_count += 1
                         if message_count % 10 == 0:
@@ -136,43 +257,10 @@ class DocChunker:
         """
         document = message['value']
         document_text = document.get('text_content', '')
-        chunks = self.chunk_by_tokens(document_text)
+
+        chunks = self.chunking_strategy.chunk(document_text)
 
         return document, chunks
-    
-    def chunk_by_tokens(self, text: str, max_tokens: int = 256, overlap=64) -> List[str]:
-        """
-        Chunk text by token count using tiktoken tokenizer.
-        
-        Args:
-            text (str): The text to chunk
-            max_tokens (int): Maximum number of tokens per chunk (default: 256)
-        
-        Returns:
-            List[str]: List of text chunks
-        """
-        try:
-            # Allow special tokens to be encoded as normal text
-            tokens = self.tokenizer.encode(text, disallowed_special=())
-            chunks = []
-            
-            for i in range(0, len(tokens), max_tokens - overlap):
-                # if the chunk size is smaller than half the max_tokens, pad the last chunk with the remaining
-                if len(tokens) - i < (max_tokens // 2):
-                    chunk_tokens = tokens[i:]
-                    chunks[-1] = chunks[-1] + self.tokenizer.decode(chunk_tokens)
-                else:
-                    chunk_tokens = tokens[i:i + max_tokens]
-                    chunk_text = self.tokenizer.decode(chunk_tokens)
-                    chunks.append(chunk_text)
-            
-            return chunks
-            
-        except Exception as e:
-            logger.error(f"Error chunking text: {e}")
-            # Fallback to character-based chunking if tokenization fails
-            chunk_size = max_tokens * 4  # Rough estimate: 1 token ≈ 4 characters
-            return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
     def create_chunk_documents(self, document: InputDocument, chunks: List[str]) -> Iterable[OutputDocument]:
         """
@@ -194,7 +282,7 @@ class DocChunker:
         """
         try:
             db = self.client[DB_NAME]
-            collection = db[COLLECTION_NAME]
+            collection = db[self.collection_name]
             clean_batch = [{k: v for k, v in doc.items() if k != "_id"} for doc in batch]
             result = collection.insert_many(clean_batch, ordered=False)
             logger.info(f"Inserted {len(result.inserted_ids)} chunks into MongoDB instance")
@@ -233,6 +321,29 @@ class DocChunker:
         logger.info("Chunker cleanup completed")
 
 if __name__ == '__main__':
-    chunker = DocChunker()
+    parser = ArgumentParser(description="The script runs a specified chunking \
+                                         strategy on the Kafka chunking topic")
+    parser.add_argument("--consumer-group", required=True,
+                        help="A unique identifier for the consumer group")
+    parser.add_argument("--collection-name", required=True,
+                        help="A unique identifier for the MongoDB \
+                              collection for the chunked documents to be stored")
+    parser.add_argument("--chunking-strategy", required=True,
+                        choices=["token", "semantic", "sentence"],
+                        help="The chunking strategy to use: [token | semantic | sentence]")
+    args = parser.parse_args()
+
+    # Factory pattern to create the appropriate chunking strategy
+    strategy_map = {
+        "token": TokenChunker(),
+        "semantic": SemanticChunker(),
+        "sentence": SentenceChunker()
+    }
+    chunking_strategy = strategy_map[args.chunking_strategy]
+
+    chunker = DocChunker(
+        consumer_group_name=args.consumer_group,
+        collection_name=args.collection_name,
+        chunking_strategy=chunking_strategy
+    )
     chunker.run()
-    
