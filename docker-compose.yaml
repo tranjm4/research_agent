@@ -31,6 +31,8 @@ services:
       - ./src/backend/agent/.env
     ports:
       - "8000:8000"
+    networks:
+      - data_database
 
   client:
     container_name: ra-client
@@ -41,3 +43,9 @@ services:
       - .env
 volumes:
   pgdata:
+
+
+networks:
+  data_database:
+    external: true
+    name: data_database
