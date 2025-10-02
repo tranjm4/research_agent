@@ -76,7 +76,6 @@ services:
       "
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - MONGO_URI=mongodb://admin:pass@arxiv_mongo:27017/arxiv_db?authSource=admin
     depends_on:
       kafka:
         condition: service_healthy
@@ -115,10 +114,9 @@ services:
       dockerfile: ./processing/Dockerfile.loader
     container_name: arxiv_doc_loader
     env_file: ./.env
-    command: ["--collection", "${COLLECTION_NAME}", "--topic", "${TOPIC_NAME}"]
+    command: [ "--collection", "${COLLECTION_NAME}", "--topic", "${TOPIC_NAME}" ]
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - MONGO_URI=mongodb://admin:pass@arxiv_mongo:27017/arxiv_db?authSource=admin
     depends_on:
       mongo:
         condition: service_healthy
@@ -134,10 +132,9 @@ services:
       context: .
       dockerfile: ./processing/Dockerfile.chunking
     env_file: ./.env
-    command: python chunking.py
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - MONGO_URI=mongodb://admin:pass@arxiv_mongo:27017/arxiv_db?authSource=admin
+    command: [ "python", "chunking.py", "--consumer-group", "${CONSUMER_GROUP_NAME}", "--collection-name", "${COLLECTION_NAME}", "--chunking-strategy", "${CHUNKING_STRATEGY}" ]
     depends_on:
       mongo:
         condition: service_healthy
@@ -145,6 +142,7 @@ services:
         condition: service_healthy
     networks:
       - messaging
+      - database
     deploy:
       replicas: 3
 
@@ -155,7 +153,6 @@ services:
     env_file: ./.env
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - MONGO_URI=mongodb://admin:pass@arxiv_mongo:27017/arxiv_db?authSource=admin
     depends_on:
       mongo:
         condition: service_healthy
@@ -164,6 +161,20 @@ services:
     networks:
       - messaging
       - database
+
+  vectorstore:
+    build:
+      context: .
+      dockerfile: ./vectorstore/Dockerfile
+    container_name: arxiv_vectorstore_builder
+    env_file: ./.env
+    command: [ "--collection", "${COLLECTION_NAME}", "--index-type", "${FAISS_INDEX_TYPE:-flat}", "--embedding-model", "${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}", "--output-path", "/app/vectorstore_data", "--batch-size", "${BATCH_SIZE:-100}", "--limit", "200", "--storage-type", "mongodb" ]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - database
+    restart: "no"
 
 volumes:
   kafka-data:
