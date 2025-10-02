@@ -8,4 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY processing/chunking.py .
 COPY message_queue/message_queue.py ./message_queue/
 
-CMD ["python", "chunking.py"]
+ENTRYPOINT ["python", "chunking.py"]
+
+CMD []
