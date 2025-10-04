@@ -96,9 +96,9 @@ async def fetch_webpage(url: str) -> Dict[str, Any]:
             return {'error': f'Failed to fetch webpage: {str(e)}'}
 
 @mcp.tool()
-async def search_academic_papers(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+async def search_internet_for_academic_papers(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """
-    Search for academic papers using scholarly search terms
+    Search the internet for academic papers using scholarly search terms
 
     Args:
         query: Research query
