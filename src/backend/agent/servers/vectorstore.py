@@ -105,6 +105,128 @@ class MongoVectorStore:
         self.metadata = pickle.loads(metadata_bytes)
         logger.info(f"Metadata loaded: {len(self.metadata)} documents")
 
+    def keyword_search(
+        self,
+        query: str,
+        top_k: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform keyword-based search on MongoDB collection with text index
+        Searches across abstract, title, and keywords fields
+
+        Args:
+            query: Search query text
+            top_k: Number of results to return
+
+        Returns:
+            List of search results with text scores
+        """
+        collection = self.db[self.collection_name]
+
+        # MongoDB text search across abstract, title, and keywords
+        results = []
+        cursor = collection.find(
+            {'$text': {'$search': query}},
+            {'score': {'$meta': 'textScore'}, 'abstract': 1, 'title': 1, 'authors': 1,
+             'url': 1, 'topics': 1, 'paper_id': 1, 'keywords': 1}
+        ).sort([('score', {'$meta': 'textScore'})]).limit(top_k)
+
+        for doc in cursor:
+            # Use abstract + title as the text (same as vectorstore)
+            abstract = doc.get('abstract', '')
+            title = doc.get('title', '')
+            text = f"{title}\n\n{abstract}" if title and abstract else (title or abstract)
+
+            results.append({
+                'score': doc.get('score', 0),
+                'text': text,
+                'metadata': {
+                    'title': doc.get('title', ''),
+                    'authors': doc.get('authors', []),
+                    'url': doc.get('url', ''),
+                    'topics': doc.get('topics', []),
+                    'paper_id': doc.get('paper_id', ''),
+                    'keywords': doc.get('keywords', [])
+                }
+            })
+
+        return results
+
+    def hybrid_search(
+        self,
+        query: str,
+        top_k: int = 5,
+        vector_weight: float = 0.7,
+        keyword_weight: float = 0.3,
+        filter_by: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Hybrid search combining vector similarity and keyword matching with reranking
+
+        Args:
+            query: Search query text
+            top_k: Number of final results to return
+            vector_weight: Weight for vector search scores (0-1)
+            keyword_weight: Weight for keyword search scores (0-1)
+            filter_by: Optional metadata filters
+
+        Returns:
+            Reranked list of search results
+        """
+        # Get results from both searches (fetch more for reranking)
+        fetch_k = top_k * 3
+
+        vector_results = self.search(query, top_k=fetch_k, filter_by=filter_by)
+        keyword_results = self.keyword_search(query, top_k=fetch_k)
+
+        # Normalize scores to 0-1 range
+        def normalize_scores(results):
+            if not results:
+                return results
+            max_score = max(r['score'] for r in results)
+            min_score = min(r['score'] for r in results)
+            score_range = max_score - min_score if max_score != min_score else 1
+
+            for r in results:
+                r['normalized_score'] = (r['score'] - min_score) / score_range
+            return results
+
+        vector_results = normalize_scores(vector_results)
+        keyword_results = normalize_scores(keyword_results)
+
+        # Combine results using RRF (Reciprocal Rank Fusion) + weighted scores
+        combined = {}
+
+        # Add vector results
+        for rank, result in enumerate(vector_results, 1):
+            key = result['metadata'].get('paper_id', '') + '_' + result['text'][:50]
+            rrf_score = 1 / (60 + rank)  # RRF with k=60
+            combined[key] = {
+                **result,
+                'combined_score': vector_weight * result.get('normalized_score', 0) + rrf_score,
+                'vector_rank': rank
+            }
+
+        # Add keyword results
+        for rank, result in enumerate(keyword_results, 1):
+            key = result['metadata'].get('paper_id', '') + '_' + result['text'][:50]
+            rrf_score = 1 / (60 + rank)
+
+            if key in combined:
+                # Merge scores if already exists
+                combined[key]['combined_score'] += keyword_weight * result.get('normalized_score', 0) + rrf_score
+                combined[key]['keyword_rank'] = rank
+            else:
+                combined[key] = {
+                    **result,
+                    'combined_score': keyword_weight * result.get('normalized_score', 0) + rrf_score,
+                    'keyword_rank': rank
+                }
+
+        # Sort by combined score and return top_k
+        reranked = sorted(combined.values(), key=lambda x: x['combined_score'], reverse=True)
+        return reranked[:top_k]
+
     def search(
         self,
         query: str,
@@ -251,7 +373,7 @@ class MongoVectorStore:
                         unique_topics.add(topic)
 
         return {
-            'total_chunks': self.index.ntotal,
+            'total_documents': self.index.ntotal,
             'total_papers': len(unique_papers),
             'total_topics': len(unique_topics),
             'embedding_dimension': self.index.d,
