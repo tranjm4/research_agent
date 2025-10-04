@@ -22,6 +22,7 @@ services:
       - ./src/backend/server/.env
     depends_on:
       - db
+      - agent
 
   agent:
     build: ./src/backend/agent
@@ -32,6 +33,7 @@ services:
     ports:
       - "8000:8000"
     networks:
+      - default
       - data_database
 
   client:
@@ -41,6 +43,8 @@ services:
       - "5173:5173"
     env_file:
       - .env
+    depends_on:
+      - server
 volumes:
   pgdata:
 
