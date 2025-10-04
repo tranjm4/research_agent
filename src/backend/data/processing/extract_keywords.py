@@ -1,15 +1,14 @@
 """
 File: src/backend/data/processing/extract_keywords.py
 
-This file is responsible for extracting keywords from the text documents.
+This file is responsible for extracting keywords from abstract text.
 The extracted keywords will be stored as document metadata for querying.
 
-Reads from the Kafka topic (default: extracting) 
+Reads from the Kafka topic (default: extracting)
 and writes to the MongoDB collection (default kwe_docs)
-and produces to the Kafka topic (default: chunking)
 """
 
-from message_queue.message_queue import KafkaConsumerWrapper, KafkaProducerWrapper
+from message_queue.message_queue import KafkaConsumerWrapper
 from pymongo.mongo_client import MongoClient
 from pymongo.errors import ConnectionFailure
 from dotenv import load_dotenv
@@ -21,6 +20,7 @@ from typing import Dict, Any, List, Optional
 from typing_extensions import TypedDict
 import signal
 import spacy
+from spacy.lang.en.stop_words import STOP_WORDS
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -28,7 +28,6 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-KAFKA_PRODUCER_TOPIC = os.getenv("TOPIC_NAME_CHUNKING", "chunking")
 KAFKA_CONSUMER_TOPIC = os.getenv("TOPIC_NAME_EXTRACTING", "extracting")
 
 DB_NAME = os.getenv("DB_NAME")
@@ -49,9 +48,6 @@ class InputDocument(TypedDict):
     topics: list[str]
     subtopics: list[str]
     obtained_date: datetime
-    parsed_date: datetime
-    text_content: str
-    parse_success: bool
     
 class OutputDocument(InputDocument):
     keywords: list[str]
@@ -60,17 +56,16 @@ class OutputDocument(InputDocument):
 class KwExtractor:
     def __init__(self):
         self.consumer = KafkaConsumerWrapper(KAFKA_CONSUMER_TOPIC,
-                                             consumer_group='extractor',
+                                             consumer_group='extractor_v2',
                                              max_poll_interval_ms=60000,
                                              max_poll_records=100)
-        self.producer = KafkaProducerWrapper(KAFKA_PRODUCER_TOPIC)
         self.running = True
         signal.signal(signal.SIGINT, self.sigint_sigterm_handler)
         signal.signal(signal.SIGTERM, self.sigint_sigterm_handler)
 
         self.nlp = spacy.load("en_core_web_sm") # Load spaCy model
         self.client = self.connect_to_mongo()
-        
+
         # Batch processing setup
         self.doc_batch = []
         self.processed_messages = []
@@ -128,65 +123,59 @@ class KwExtractor:
             self.cleanup()
 
     def process_message(self, message: InputDocument) -> OutputDocument:
-        """Process a chunk message and extract keywords"""
+        """Process a document message and extract keywords from abstract"""
         try:
             doc_data = message['value']
-            
-            # Extract document text for keyword processing
-            doc_text = doc_data.get('text_content', '')
-            if not doc_text:
-                logger.warning("Empty chunk_text received, skipping")
-                return doc_data  # Return empty chunk for batch consistency
-            
-            # Extract keywords from chunk text
-            keywords = self.extract(doc_text)
-            
-            # Add keywords to the chunk document
-            doc_data['keywords'] = keywords
+
+            # Extract abstract text for keyword processing
+            abstract = doc_data.get('abstract', '')
+            title = doc_data.get('title', '')
+
+            # Combine title and abstract for better keyword extraction
+            text_for_extraction = f"{title}. {abstract}" if title and abstract else (title or abstract)
+
+            if not text_for_extraction:
+                logger.warning(f"Empty abstract and title for paper {doc_data.get('paper_id', 'unknown')}, skipping keyword extraction")
+                doc_data['keywords'] = []
+            else:
+                # Extract keywords from abstract + title
+                keywords = self.extract(text_for_extraction)
+                doc_data['keywords'] = keywords
+
             doc_data['kwe_date'] = RUNTIME_DATE
-            
+
             return doc_data
-                
+
         except Exception as e:
-            logger.error(f"Error processing chunk message: {e}")
+            logger.error(f"Error processing document message: {e}")
             return None
     
     def flush_batch(self) -> bool:
-        """Insert the current batch of chunks and commit their offsets."""
+        """Insert the current batch of documents and commit their offsets."""
         if not self.doc_batch:
             return True
-            
+
         try:
-            
+
             # Create a copy of the docs
             mongo_docs = []
             for doc in self.doc_batch:
                 clean_doc = {k:v for k,v in doc.items() if k != "_id"}
                 mongo_docs.append(clean_doc)
-                    
+
             # Batch insert all docs to MongoDB
             result = self.client[DB_NAME][KWE_COLLECTION_NAME].insert_many(mongo_docs, ordered=False)
-            
+
             if result.inserted_ids:
-                # Send all processed documents to next topic (e.g., chunking)
-                docs_sent = 0
-                for document in self.doc_batch:
-                    if self.producer.send_message(document, verbose=False):
-                        docs_sent += 1
-                    else:
-                        logger.warning(f"Failed to send document {document.get('paper_id', 'unknown')} to chunking topic")
-                logger.info(f"Successfully send {docs_sent} documents to chunking topic")
-                
-                # Commit all message offsets only after successful
-                # MongoDB insert AND Kafka send
+                # Commit all message offsets after successful MongoDB insert
                 for message in self.processed_messages:
                     commit_success = self.consumer.commit_offset(message)
                     if not commit_success:
                         logger.error("Failed to commit offset - likely kicked from consumer group.")
                         return False
-                
-                logger.info(f"Successfully inserted {len(result.inserted_ids)} chunks with keywords")
-                
+
+                logger.info(f"Successfully inserted {len(result.inserted_ids)} documents with keywords")
+
                 # Clear the batches
                 self.doc_batch.clear()
                 self.processed_messages.clear()
@@ -194,7 +183,7 @@ class KwExtractor:
             else:
                 logger.error("Failed to insert batch into MongoDB")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error processing batch: {e}")
             return False
@@ -202,12 +191,11 @@ class KwExtractor:
     def extract(self, text: str) -> List[str]:
         """
         Extracts keywords from a given text excerpt.
-        Uses the configured NLP method to extract 50 keywords
-        TODO: Improve pruning/method to reduce noisy results
-        
+        Filters out stop words, articles, and other low-value terms.
+
         Args:
             text (str): The input text to extract keywords from
-            
+
         Returns:
             List[str]: The list of keywords that the extraction method produces
         """
@@ -215,21 +203,46 @@ class KwExtractor:
             doc = self.nlp(text)
             # Extract named entities and noun phrases as keywords
             keywords = []
-            
-            # Add named entities
+
+            # Add named entities (these are typically good keywords)
             for ent in doc.ents:
-                if ent.label_ in ['PERSON', 'ORG', 'GPE', 'PRODUCT', 'EVENT']:
-                    keywords.append(ent.text.lower().strip())
-            
-            # Add noun phrases
+                if ent.label_ in ['PERSON', 'ORG', 'GPE', 'PRODUCT', 'EVENT', 'WORK_OF_ART', 'LAW', 'LANGUAGE']:
+                    ent_text = ent.text.lower().strip()
+                    # Skip if it's just stop words
+                    if ent_text not in STOP_WORDS:
+                        keywords.append(ent_text)
+
+            # Add noun phrases (but filter more aggressively)
             for chunk in doc.noun_chunks:
                 chunk_text = chunk.text.lower().strip()
-                if len(chunk_text.split()) <= 3 and len(chunk_text) < 16:
-                    keywords.append(chunk.text.lower().strip())
-            
-            # Remove duplicates and empty strings
-            return list(set([kw for kw in keywords if kw and len(kw) > 2]))[:50]
-            
+
+                # Skip if too long
+                if len(chunk_text.split()) > 3 or len(chunk_text) > 30:
+                    continue
+
+                # Filter out chunks that start with articles/determiners
+                first_word = chunk_text.split()[0]
+                if first_word in STOP_WORDS or first_word in ['a', 'an', 'the', 'this', 'that', 'these', 'those']:
+                    # Try to extract the meaningful part (remove leading stop words)
+                    words = chunk_text.split()
+                    filtered_words = [w for w in words if w not in STOP_WORDS and w not in ['a', 'an', 'the']]
+                    if filtered_words:
+                        chunk_text = ' '.join(filtered_words)
+                    else:
+                        continue
+
+                # Only add if not purely stop words and has reasonable length
+                if chunk_text and len(chunk_text) > 2 and chunk_text not in STOP_WORDS:
+                    keywords.append(chunk_text)
+
+            # Remove duplicates, filter by length, and limit to top 50
+            unique_keywords = list(set([
+                kw for kw in keywords
+                if kw and len(kw) > 2 and kw not in STOP_WORDS
+            ]))
+
+            return unique_keywords[:50]
+
         except Exception as e:
             logging.error(f"Error extracting keywords from text: {e}")
             return []

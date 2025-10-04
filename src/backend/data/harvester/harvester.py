@@ -44,7 +44,7 @@ NS = {
 
 TIMESTAMP_FILE = "/app/data/last_harvest.json"
 
-TOPIC_NAME_PRODUCER = os.getenv("TOPIC_NAME_PARSING", "parsing")
+TOPIC_NAME_PRODUCER = os.getenv("TOPIC_NAME_EXTRACTING", "extracting")
 BATCH_SIZE = int(os.getenv("HARVESTER_BATCH_SIZE", 512))
 MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = os.getenv("DB_NAME")

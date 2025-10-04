@@ -49,9 +49,6 @@ class InputDocument(TypedDict):
     topics: list[str]
     subtopics: list[str]
     obtained_date: datetime
-    parsed_date: datetime
-    text_content: str
-    parse_success: bool
     keywords: List[str]
     kwe_date: datetime
     
@@ -252,13 +249,23 @@ class DocChunker:
     def process_message(self, message: Dict[str, Any]) -> Tuple[InputDocument, List[str]]:
         """
         Process a single message from the Kafka topic consumer.
-        Retrieves chunks from the input document content,
+        Retrieves chunks from the input document abstract,
         adds it alongside the original document.
         """
         document = message['value']
-        document_text = document.get('text_content', '')
 
-        chunks = self.chunking_strategy.chunk(document_text)
+        # Use abstract for chunking since full text is no longer preprocessed
+        abstract = document.get('abstract', '')
+        title = document.get('title', '')
+
+        # Combine title and abstract for chunking
+        document_text = f"{title}\n\n{abstract}" if title and abstract else (title or abstract)
+
+        if not document_text:
+            logger.warning(f"No text available for chunking paper {document.get('paper_id', 'unknown')}")
+            chunks = []
+        else:
+            chunks = self.chunking_strategy.chunk(document_text)
 
         return document, chunks
 
@@ -267,8 +274,8 @@ class DocChunker:
         Given the original document and its text chunks, create a ChunkDocument for each chunk.
         """
         for chunk_text in chunks:
-            # make a copy of the original document WITHOUT the entire text content
-            new_document = {k:v for k,v in document.items() if k != "text_content"}
+            # make a copy of the original document
+            new_document = {k:v for k,v in document.items()}
             new_document['chunk_text'] = chunk_text
             new_document['chunked_date'] = RUNTIME_DATE
             yield new_document

@@ -1,7 +1,7 @@
 """
 File: src/backend/data/vectorstore/build_vectorstore.py
 
-This file reads chunked documents from MongoDB and builds a FAISS vectorstore for retrieval.
+This file reads documents with keywords from MongoDB and builds a FAISS vectorstore for retrieval using abstract text.
 """
 
 from pymongo.mongo_client import MongoClient
@@ -47,7 +47,7 @@ if not DB_NAME or not MONGO_URI:
 
 
 class FAISSVectorStoreBuilder:
-    """Builds a FAISS vector store from MongoDB chunked documents"""
+    """Builds a FAISS vector store from MongoDB documents with keywords"""
 
     def __init__(
         self,
@@ -62,7 +62,7 @@ class FAISSVectorStoreBuilder:
         Initialize the FAISS VectorStoreBuilder
 
         Args:
-            collection_name: MongoDB collection name containing chunked documents
+            collection_name: MongoDB collection name containing documents with keywords
             embedding_model: Name of the sentence-transformers model to use
             vectorstore_path: Path to save the vectorstore
             batch_size: Batch size for processing documents
@@ -257,13 +257,24 @@ class FAISSVectorStoreBuilder:
         """Prepare a batch and return texts, embeddings, and metadata"""
         texts = []
         metadatas = []
+        skipped_count = 0
 
         for doc in batch:
-            chunk_text = doc.get('chunk_text', '')
-            if not chunk_text:
+            # Use abstract and title for embedding
+            abstract = doc.get('abstract', '')
+            title = doc.get('title', '')
+
+            # Combine title and abstract
+            text = f"{title}\n\n{abstract}" if title and abstract else (title or abstract)
+
+            if not text:
+                skipped_count += 1
+                # Log first few skipped docs for debugging
+                if skipped_count <= 3:
+                    logger.warning(f"Skipping document - no abstract/title. Keys: {list(doc.keys())[:10]}")
                 continue
 
-            texts.append(chunk_text)
+            texts.append(text)
 
             # Prepare metadata (exclude large fields)
             metadata = {
@@ -273,9 +284,12 @@ class FAISSVectorStoreBuilder:
                 'url': doc.get('url', ''),
                 'topics': ', '.join(doc.get('topics', [])) if doc.get('topics') else '',
                 'keywords': ', '.join(doc.get('keywords', [])) if doc.get('keywords') else '',
-                'chunked_date': doc.get('chunked_date', ''),
+                'kwe_date': doc.get('kwe_date', ''),
             }
             metadatas.append(metadata)
+
+        if skipped_count > 0:
+            logger.warning(f"Skipped {skipped_count}/{len(batch)} documents in batch (no abstract/title)")
 
         if not texts:
             return [], np.array([]), []
@@ -352,7 +366,7 @@ class FAISSVectorStoreBuilder:
             'total_vectors': self.faiss_index.ntotal,
             'embedding_dimension': self.faiss_index.d,
             'created_at': datetime.utcnow(),
-            'num_chunks': len(self.faiss_metadata)
+            'num_documents': len(self.faiss_metadata)
         }
 
         # Delete old vectorstore if exists
@@ -412,13 +426,13 @@ class FAISSVectorStoreBuilder:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Build a FAISS vectorstore from MongoDB chunked documents"
+        description="Build a FAISS vectorstore from MongoDB documents with keywords"
     )
     parser.add_argument(
         "--collection",
         type=str,
         required=True,
-        help="MongoDB collection name containing chunked documents"
+        help="MongoDB collection name containing documents with keywords"
     )
     parser.add_argument(
         "--index-type",
