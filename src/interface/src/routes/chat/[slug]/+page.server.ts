@@ -1,7 +1,7 @@
 import type { PageServerLoad } from './$types';
+import { env } from '$env/dynamic/private';
 
-
-const API_BASE_URL: string = 'http://localhost:8080';
+const API_BASE_URL: string = env.SERVER_BASE_URL + ':' + env.SERVER_PORT || 'http://localhost:8080';
 
 interface Message {
     id: number;
@@ -10,18 +10,26 @@ interface Message {
     sender: 'user' | 'assistant' | 'error';
 }
 
-export const load: PageServerLoad = async ({ params, fetch }) => {
+export const load: PageServerLoad = async ({ params, fetch, cookies }) => {
     const { slug } = params;
     // Get the conversation data based on the slug
     try {
-        // console.log(`Fetching conversation data for slug: ${slug}`);
+        // Get JWT token from cookies - check both possible cookie names
+        const sessionToken = cookies.get('session_token') || cookies.get('token');
+
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+        };
+
+        // Include JWT token in Cookie header if available
+        if (sessionToken) {
+            headers['Cookie'] = `session_token=${sessionToken}`;
+        }
+
         const response = await fetch(`${API_BASE_URL}/chat/history/${slug}`, {
             method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers,
             credentials: 'include',
-            mode: 'cors',
         })
 
         if (!response.ok) {
