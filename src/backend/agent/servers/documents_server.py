@@ -48,36 +48,76 @@ def get_tools_and_resources():
 
 
 @mcp.tool()
-async def search_documents(query: str, top_k: int = 5, filter_topics: Optional[str] = None) -> List[Dict[str, Any]]:
+async def search_internal_research_documents(query: str, top_k: int = 3, filter_topics: Optional[str] = None, use_hybrid: bool = False) -> str:
     """
-    Search internal research documents using vector similarity
+    Search internal research documents using vector similarity or hybrid search
 
     Args:
         query: The search query text
-        top_k: Number of top results to return (default: 5)
+        top_k: Number of top results to return (default: 3)
         filter_topics: Optional topic filter (e.g., 'cs.AI', 'machine learning')
+        use_hybrid: Use hybrid search (vector + keyword) with reranking (default: False)
 
     Returns:
-        List of search results with scores, text chunks, and metadata
+        Formatted string with relevant papers, citations, and metadata
     """
     filter_by = {'topics': filter_topics} if filter_topics else None
-    results = vectorstore.search(query, top_k=top_k, filter_by=filter_by)
-    return results
+
+    if use_hybrid:
+        results = vectorstore.hybrid_search(query, top_k=top_k, filter_by=filter_by)
+    else:
+        results = vectorstore.search(query, top_k=top_k, filter_by=filter_by)
+
+    if not results:
+        return "No relevant documents found in the internal database."
+
+    # Log what we received for debugging
+    logger.info(f"Vectorstore returned {len(results)} results")
+    if results:
+        first_result = results[0]
+        logger.info(f"Sample result structure: keys={list(first_result.keys())}")
+        logger.info(f"Sample text length: {len(first_result.get('text', ''))}")
+        if 'metadata' in first_result:
+            logger.info(f"Sample metadata keys: {list(first_result['metadata'].keys())}")
+
+    # Format results concisely: abstract text (truncated) + citation
+    formatted_results = []
+    for i, result in enumerate(results, 1):
+        text = result.get('text', '')
+        metadata = result.get('metadata', {})
+
+        # Truncate text to 800 chars (abstracts are longer than chunks were)
+        abstract_preview = text[:800] + '...' if len(text) > 800 else text
+
+        formatted_results.append(
+            f"[{i}] Score: {result.get('score', 0):.3f}\n"
+            f"Abstract: {abstract_preview}\n"
+            f"Title: {metadata.get('title', 'Unknown')}\n"
+            f"Authors: {', '.join(metadata.get('authors', []))[:100] if isinstance(metadata.get('authors'), list) else 'Unknown'}\n"
+            f"URL: {metadata.get('url', 'N/A')}\n"
+            f"Topics: {', '.join(metadata.get('topics', []))[:100] if isinstance(metadata.get('topics'), list) else 'N/A'}\n"
+            f"Keywords: {', '.join(metadata.get('keywords', []))[:100] if isinstance(metadata.get('keywords'), list) else 'N/A'}"
+        )
+        logger.info(formatted_results[-1])
+    return "\n\n---\n\n".join(formatted_results)
 
 
 @mcp.tool()
-async def get_paper_chunks(paper_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+async def get_paper_by_id(paper_id: str) -> Dict[str, Any]:
     """
-    Retrieve all text chunks from a specific paper
+    Retrieve a specific paper by its ID
 
     Args:
-        paper_id: The paper ID to retrieve chunks for
-        limit: Maximum number of chunks to return (default: 50)
+        paper_id: The paper ID to retrieve
 
     Returns:
-        List of text chunks with metadata for the specified paper
+        Paper document with abstract, title, authors, keywords, and metadata
     """
-    return vectorstore.search_by_paper(paper_id, limit=limit)
+    results = vectorstore.search_by_paper(paper_id, limit=1)
+    if results:
+        return results[0]
+    else:
+        return {"error": f"Paper {paper_id} not found"}
 
 
 @mcp.tool()
@@ -101,7 +141,7 @@ async def get_vectorstore_stats() -> Dict[str, Any]:
     Get statistics about the vectorstore
 
     Returns:
-        Dictionary with total chunks, papers, topics, and index info
+        Dictionary with total documents, papers, topics, and index info
     """
     return vectorstore.get_stats()
 
